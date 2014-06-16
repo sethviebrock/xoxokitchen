@@ -1,0 +1,19 @@
+diff --git a/sites/all/modules/ctools/js/auto-submit.js b/sites/all/modules/ctools/js/auto-submit.js
+index bc5a58e..326b8f5 100644
+--- a/sites/all/modules/ctools/js/auto-submit.js
++++ b/sites/all/modules/ctools/js/auto-submit.js
+@@ -77,8 +77,12 @@ Drupal.behaviors.CToolsAutoSubmit = {
+             }
+           })
+           .keyup(function(e) {
+-            if ($.inArray(e.keyCode, discardKeyCode) === -1) {
+-              timeoutID = setTimeout($.proxy(triggerSubmit, this.form), 500);
++            var ajax_processing = $(document).data("ajax_processing");
++            if(!ajax_processing) {
++              var len = $(this).val().length;
++              if (len > 3 && $.inArray(e.keyCode, discardKeyCode) === -1) {
++                timeoutID = setTimeout($.proxy(triggerSubmit, this.form), 700);
++              }
+             }
+           });
+       });

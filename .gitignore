@@ -3,3 +3,8 @@ docroot/files
 docroot/sites/*/files
 docroot/sites/*/private
 
+# IDE/OS-specific files
+*.DS_Store
+*._.DS_Store
+/docroot/nbproject
+

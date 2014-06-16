@@ -1,0 +1,12 @@
+diff --git a/sites/all/modules/views/includes/ajax.inc b/sites/all/modules/views/includes/ajax.inc
+index 374f31d..abfa366 100644
+--- a/sites/all/modules/views/includes/ajax.inc
++++ b/sites/all/modules/views/includes/ajax.inc
+@@ -69,6 +69,7 @@ function views_ajax() {
+       $view->dom_id = $dom_id;
+ 
+       $commands[] = ajax_command_replace('.view-dom-id-' . $dom_id, $view->preview($display_id, $args));
++      $commands[] = ajax_command_invoke('#edit-title', 'xoxofocus');
+     }
+ 
+     drupal_alter('views_ajax_data', $commands, $view);

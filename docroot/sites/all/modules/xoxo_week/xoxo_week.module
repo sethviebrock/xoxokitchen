@@ -1,0 +1,114 @@
+<?php
+function xoxo_week_views_pre_view(&$view, &$display_id, &$args) {
+  if(isset($view->display['page']->handler)){
+    $class = get_class($view->display['page']->handler->get_plugin());
+    if($class == 'xoxo_week_plugin_style_week') {
+      module_load_include('inc', 'xoxo_week', 'xoxo_week');
+      $day = 60 * 60 * 24;
+      $arg = array_key_exists(0, $args) ? $args[0] : FALSE;
+      $t = $arg ? _xoxo_week_timestamp($arg) : time();
+      $args[0] = _xoxo_week_sun_sat($t);
+      $categories_field_info = field_info_field('field_event_category');
+      $all_vocabularies = taxonomy_vocabulary_get_names();
+      $vocabulary_name = $categories_field_info['settings']['allowed_values'][0]['vocabulary'];
+      $pager = array('#theme' => 'week_pager', '#base_url' => 'calendar', '#time' => $args[0], '#label' => t('Your meal calendar For:'));
+      $view->all_terms = taxonomy_get_tree($all_vocabularies[$vocabulary_name]->vid);
+      $view->all_times = range(_xoxo_week_sun(FALSE, $t), _xoxo_week_sat(FALSE, $t), $day);
+      $view->attachment_before = drupal_render($pager);
+    }
+  }
+}
+function xoxo_week_views_api() {
+  return array(
+    'api' => 3
+  );
+}
+function xoxo_week_theme($existing, $type, $theme, $path) {
+  return array('xoxo_week_view_week' => array(
+    'render element' => 'week'
+  ));
+}
+function template_preprocess_xoxo_week_view_week(&$variables) {
+  module_load_include('inc', 'xoxo_week', 'xoxo_week');
+  $view = $variables['view'];
+  $nodes = array();
+  foreach ($view->result as $result) {
+    if (isset($result->nid)) {
+      $nodes[] = node_load($result->nid);
+    }
+  }
+  $data = array();
+  foreach ($nodes as $node) {
+    $time = strtotime(date('Y-m-d', _xoxo_first_field_value($node, 'field_event_date', 'value')));
+    $tid = _xoxo_first_field_value($node, 'field_event_category', 'tid');
+    $data[date('Y-m-d', $time)][$tid] = $node->nid;
+  }
+  $grid = array();
+  foreach ($view->all_times as $time) {
+    $date = date('Y-m-d', $time);
+    $day = (int) date('w', $time) + 1;
+    foreach ($view->all_terms as $term) {
+      $tid = $term->tid;
+      $nid = isset($data[$date][$tid]) ? $data[$date][$tid] : FALSE;
+      $grid[$time]['data'][$tid] = _xoxo_week_event_value($tid, $time, $nid);;
+    }
+    $des = _xoxo_fields_get_day_description($time);
+    $des_attr = array('class' => 'description-text', 'colspan' => 5);
+    $day_name =
+      _xoxo_week_is_actual($time)
+      ? _xoxo_fields_theme_calendar_day_column($time, date('D M j', $time))
+      : date('D M j', $time);
+    array_unshift(
+      $grid[$time]['data'],
+      array('data' => $day_name)
+    );
+    if(!empty($des)) {
+      $grid[$time . 'des']['data'] = array(array('data' => $des) + $des_attr);
+      $grid[$time . 'des']['class'] = array('event-description', 'event-day-' . $day);
+    }
+    $grid[$time]['class'] = array('calendar-day-' . $time, 'week-day', 'week-day-' . $day);
+    if(date('Y-m-d', $time) == date('Y-m-d')) {
+      $grid[$time]['class'][] = 'current-day';
+    }
+  }
+  $all_term_names = array(0 => '');
+  foreach ($view->all_terms as $term) {
+    $t = !empty($term) ? taxonomy_term_title($term) : '';
+    $all_term_names[] = $t;
+  }
+  array_unshift($grid, $all_term_names);
+  $variables['grid'] = $grid;
+}
+function xoxo_week_menu() {
+  return array(
+    'calendar' => array(
+      'title' => 'XOXO Week AJAX',
+      'description' => 'XOXO Week usual AJAX callback.',
+      'type' => MENU_CALLBACK,
+      'access arguments' => array('access content'),
+      'file' => 'xoxo_week.inc',
+      'page callback' => '_xoxo_week_ajax'
+    )
+  );
+}
+function xoxo_week_node_access($node, $op, $account) {
+  module_load_include('inc', 'xoxo_week', 'xoxo_week');
+  if (!is_object($node)) {
+    return NODE_ACCESS_IGNORE;
+  }
+  if (
+    ($op == 'update' || $op == 'delete' || $op == 'create')
+    && ($node->type == 'event' || $node->type == 'shopping_list')
+  ) {
+    if($node->type == 'event') {
+      $items = field_get_items('node', $node, 'field_event_date');
+    }
+    else {
+      $items = field_get_items('node', $node, 'field_shopping_list_date');
+    }
+    $time = isset($items[0]['value']) ? $items[0]['value'] : FALSE;
+    if(!_xoxo_week_is_actual($time)) {
+      return NODE_ACCESS_DENY;
+    }
+  }
+}

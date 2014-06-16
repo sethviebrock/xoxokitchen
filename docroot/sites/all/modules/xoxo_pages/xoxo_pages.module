@@ -1,0 +1,300 @@
+<?php
+//Drupal.
+function xoxo_pages_permission() {
+  return array('view_fridge_door' => array('title' => t('View Fridge Door')));
+}
+function xoxo_pages_views_pre_view(&$view, &$display_id, &$args) {
+  if(
+    $view->name == 'kitchen'
+    && $display_id == 'page'
+    && empty($GLOBALS['user']->uid)
+  ) {
+    drupal_goto('user');
+  }
+}
+function xoxo_pages_views_post_execute(&$view) {
+  if($view->name == 'recipes_andrei') {
+    if(empty($view->exposed_raw_input['search_api_views_fulltext'])) {
+      $view->result = array();
+      unset($view->query->pager);
+    }
+  }
+}
+function xoxo_pages_menu() {
+  $fridge = array(
+    'title' => 'My Fridge Area',
+    'description' => 'Personalized My Fridge feed.',
+    'access callback' => '_xoxo_pages_fridge_available',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('_xoxo_recipes_fridge_form')
+  );
+  return array(
+    'fridge' => $fridge,
+    'fridge/%user' => $fridge + array(
+      'access arguments' => array(1),
+      'page arguments' => array('_xoxo_recipes_fridge_form', 1)
+    ),
+    'admin/config/system/xoxo-pages' => array(
+      'title' => 'XOXO Pages',
+      'description' => 'XOXO Pages module configuration page.',
+      'access arguments' => array('administer_site_configuration'),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('xoxo_pages_config_form')
+    ),
+    'kitchen-setup' => array(
+      'title' => 'Kitchen Setup',
+      'description' => 'Some user\'s kitchen settings',
+      'access arguments' => array('access content'),
+      'page callback' => '_xoxo_pages_kitchen_setup'
+    ),
+    'activate/%/%/%' => array(
+      'title' => 'User Activation',
+      'description' => 'Set Consumer role and redirect to Kitchen Setup page.',
+      'access callback' => '_xoxo_pages_hash_access',
+      'access arguments' => array(1, 2, 3),
+      'page callback' => '_xoxo_pages_activate',
+      'page arguments' => array(1),
+      'type' => MENU_CALLBACK
+    ),
+    'brand-ids' => array(
+      'title' => 'Brand IDs',
+      'access arguments' => array('edit_delete_own_brand_content'),
+      'page callback' => '_xoxo_pages_brand_ids',
+      'delivery callback' => 'drupal_json_output',
+      'type' => MENU_CALLBACK
+    )
+  );
+}
+function _xoxo_pages_hash_access($account, $timestamp, $hash) {
+  $account = is_object($account) ? (
+    property_exists($account, 'uid') ? $account : FALSE
+  ) : user_load($account);
+  if (!$account) {
+    drupal_set_message(
+      t(variable_get('xoxo_pages_inactual', 'Error.')),
+      'error'
+    );
+    return FALSE;
+  }
+  if (
+    $account->uid
+    && $timestamp >= $account->login
+    && $timestamp <= REQUEST_TIME
+    && $hash == user_pass_rehash($account->pass, $timestamp, $account->login)
+    && $GLOBALS['user']->uid === 0
+    && array_key_exists(4, $account->roles)//4 - Guest role ID.
+  ) {
+    return TRUE;
+  }
+}
+function xoxo_pages_token_info() {
+  $info = array();
+  $info['tokens']['user']['activation-url'] = array(
+    'name' => t('Activation URL'),
+    'description' => t('Follow the URL to make Consumer from Guest.'),
+    'type' => 'user'
+  );
+  return $info;
+}
+
+function xoxo_pages_tokens($type, $tokens, array $data = array(), array $options = array()) {
+  $repl = array();
+  if(
+    array_key_exists('activation-url', $tokens)
+    && $type == 'user'
+    && array_key_exists('user', $data)
+  ) {
+    $hash = user_pass_rehash($data['user']->pass, REQUEST_TIME, $data['user']->login);
+    $repl[$tokens['activation-url']] = url(
+      'activate/' . $data['user']->uid . '/' . REQUEST_TIME . '/' . $hash,
+      array('absolute' => TRUE)
+    );
+  }
+  return $repl;
+}
+function _xoxo_pages_activate($account) {
+  $account = is_object($account) ? (
+    property_exists($account, 'uid') ? $account : FALSE
+  ) : user_load($account);
+  if($account) {
+    $GLOBALS['user'] = $account;
+    user_login_finalize();
+  }
+  else {
+    drupal_set_message(t('Can\'t find account to login.'), 'error');
+    drupal_goto('');
+  }
+}
+
+
+function xoxo_pages_user_login(&$edit, $account) {
+  if (array_key_exists(4, $account->roles)) {
+    $role = user_role_load(5);//5 - Consumer role.
+    $name = is_object($role) ? (property_exists($role, 'name') ? $role->name : FALSE) : FALSE;
+    if ($name) {
+      $account->roles[5] = $name;
+      unset($account->roles[4]);
+      // activate user
+      $account->status = 1;
+      user_save($account);
+      drupal_set_message(t('Registration complete.'));
+      drupal_goto(variable_get('logintoboggan_redirect_on_confirm', 'kitchen-setup'));
+    }
+  }
+}
+
+/*
+ * Implementation of hook_user_presave
+ */
+function xoxo_pages_user_presave(&$edit, $account, $category) {
+  // block user (set status to 0) if has role "guest"
+  if(isset($edit['roles'][4]) && count($edit['roles']) == 2) {
+    $edit['status'] = 0;
+  }
+}
+
+function xoxo_pages_views_drag_drop_assign_actions(&$config, $args) {
+  module_load_include('inc', 'xoxo_fields', 'xoxo_fields.add_to_category');
+  if(
+    arg(0) == 'node'
+    || arg(0) == 'shopping-list'
+    || arg(0) == 'kitchen-setup'
+    || arg(0) == 'kitchen'
+  ) {
+    _xoxo_fields_addcat_prepare_actions($config, $args);
+  }
+}
+function _xoxo_pages_kitchen_setup() {
+  return array();
+}
+function xoxo_pages_block_info() {
+  return array(
+    'kitchen_link' => array('info' => t('Kitchen Link')),
+    'buttons' => array('info' => t('Buttons')),
+    'hello_username' => array('info' => t('Hello User'))
+  );
+}
+function xoxo_pages_block_view($delta = '') {
+  $block = array();
+  $t = 'Continue To My Kitchen';
+  if ($delta == 'buttons') {
+    $block['content'] = array(
+      'print' => _xoxo_pages_print_link('shopping-list'),
+      'mail' => _xoxo_pages_mail_link('shopping-list')
+    );
+  }
+  else if ($delta == 'hello_username') {
+    if ($GLOBALS['user']->uid) {
+      $u = user_load($GLOBALS['user']->uid);
+      $block['content'] = _xoxo_pages_hello($u);
+    }
+  }
+  else{
+    $node = node_load(arg(1));
+    $type = isset($node->type) ? $node->type : FALSE;
+    if ($type == 'brand' || arg(0) == 'kitchen-setup') {
+      $block['content'] = array(
+        '#type' => 'link',
+        '#title' => t($t),
+        '#href' => 'kitchen',
+        '#options' => array('html' => TRUE)
+      );
+    }
+  }
+  return $block;
+/*  $b = $delta === 'buttons';
+  $js = $b ? array(
+    drupal_get_path('module', 'xoxo_pages') . '/xoxo_pages.js',
+    drupal_get_path('module', 'xoxo_pages') . '/jquery.printElement.min.js'
+  ) : array();
+  $js[] =
+    current_path() === 'shopping-list'
+    ? array('data' => array('xoxoPages' => array('print' => '#shopping-list-content')), 'type' => 'setting')
+    : array('data' => array('xoxoPages' => array('print' => '#region-content')), 'type' => 'setting');
+  $content = $b ? array(
+    'print' => _xoxo_pages_print_link('shopping-list'),
+    'mail' => _xoxo_pages_mail_link('shopping-list')
+  ) : array(
+    '#theme' => 'link',
+    '#text' => t('Continue To My Kitchen'),
+    '#path' => 'kitchen',
+    '#options' => array('attributes' => array(), 'html' => TRUE)
+  );
+  return array(
+    'subject' => NULL,
+    'content' => $content
+  );*/
+}
+function _xoxo_pages_hello($account) {
+  $c = array(
+    '#type' => 'container',
+    '#attributes' => array('class' => array('hello'))
+  );
+  $c['hello'] = array(
+    '#type' => 'html_tag',
+    '#tag' => 'h1',
+    '#value' => t('Hello')
+  );
+  $c['name'] = array(
+    '#type' => 'html_tag',
+    '#tag' => 'h2',
+  );
+  $items = (array) field_get_items('user', $account, 'field_user_name');
+  $item = reset($items);
+  $name = isset($item['given']) ? $item['given'] : FALSE;
+  $c['name']['#value'] = $name;
+  return $c;
+}
+function _xoxo_pages_print_link($path) {
+  return array(
+    '#theme' => 'link',
+    '#path' => $path . '/print',
+    '#options' => array(
+      'html' => TRUE,
+      'attributes' => array('class' => array('button', 'print'), 'target' => '_blank')),
+    '#text' => 'Print'
+  );
+}
+function _xoxo_pages_mail_link($path) {
+  return array(
+    '#theme' => 'link',
+    '#path' => $path . '/mail',
+    '#options' => array('attributes' => array(), 'html' => TRUE, 'attributes' => array('class' => array('button', 'use-ajax', 'mail'))),
+    '#text' => 'Mail',
+    '#attached' => array('library' => array('system', 'drupal.ajax'))
+  );
+}
+function xoxo_pages_menu_alter(&$items) {
+  $items['node/%node/clone']['title'] = t('Edit');
+}
+function xoxo_pages_config_form($form_state) {
+  $i = array(
+    '#type' => 'textfield',
+    '#title' => t('The User Is Not Actual Message'),
+    '#default_value' => variable_get('xoxo_pages_inactual', '')
+  );
+  $f = system_settings_form(array(
+    'xoxo_pages_inactual' => $i,
+    'test' => drupal_get_form('xoxo_pages_recipes_groups_form')
+  ));
+  return $f;
+}
+function _xoxo_pages_brand_ids($s = '') {
+  return db_select('xoxo_brands', 'x')
+    ->fields('x', array('bid', 'value'))
+    ->condition('x.value', db_like($s) . '%', 'LIKE')
+    ->range(0, 20)
+    ->execute()
+    ->fetchAllKeyed();
+}
+function xoxo_pages_field_widget_number_form_alter(&$form, &$form_state, $context) {
+  $id = 107;
+  if ($context['instance']['id'] == $id) {
+    $form['value']['#autocomplete_path'] = 'brand-ids';
+  }
+}
+//User.
+function _xoxo_pages_fridge_available($account = FALSE) {
+  $account = $account ? $account : $GLOBALS['user'];
+  return user_access('view_fridge_door', $account);
+}

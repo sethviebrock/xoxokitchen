@@ -1,0 +1,5 @@
+#block-xoxo-components-products .group-component-actions,
+.group-recipe-actions,
+.bubble-tail {
+  display: none;
+}

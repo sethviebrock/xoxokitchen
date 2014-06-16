@@ -1,0 +1,21 @@
+<?php
+// info: inplaceedit.install, v1.0 2012/3/7 Segei Churilo
+
+/**
+ * @file inplaceedit.install
+ * Contains install and update functions for inplaceedit.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function inplaceedit_install() {
+
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function inplaceedit_uninstall() {
+
+}

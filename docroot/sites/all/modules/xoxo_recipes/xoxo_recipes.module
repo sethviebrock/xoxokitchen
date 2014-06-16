@@ -1,0 +1,99 @@
+<?php
+$p = drupal_get_path('module', 'xoxo_recipes') . '/';
+require_once $p . 'constants.inc';
+//Drupal.
+function xoxo_recipes_block_info() {
+  $s = 'Recipes Groups';
+  return array('recipes_groups' => array('info' => t($s)));
+}
+function _xoxo_recipes_query() {
+  $query = db_select('node', 'n');
+  $query->condition('n.type', 'recipe');
+  $query->join('field_data_field_recipe_meal_type', 'meal_type', 'meal_type.entity_id=n.nid');
+  return $query;
+}
+//Block.
+function xoxo_recipes_block_view($delta = '') {
+  $block = array();
+  if ($delta == 'recipes_groups') {
+    $q = _xoxo_recipes_brand(_xoxo_recipes_query(), arg(1));
+    $q->addField('n', 'nid');
+    $q->addField('meal_type', 'field_recipe_meal_type_tid');
+    $r = $q->range(0, variable_get('xoxo_recipes_recipes_groups_limit', 7))->execute()->fetchAllKeyed();
+    $block['content'] = array();
+    foreach(array_unique($r) as $tid) {
+      $block['content'] += drupal_get_form('xoxo_recipes_group_form', $tid);
+    }
+    $nodes = node_load_multiple(array_keys($r));
+    foreach ($r as $nid => $tid) {
+      $block['content'][$tid][$nid] = node_view($nodes[$nid], 'in_brand_page');
+    }
+  }
+  return $block;
+}
+function xoxo_recipes_block_configure($delta = '') {
+  $f = array();
+  if ($delta == 'recipes_groups') {
+    $vals = range(4, 100);
+    $f['xoxo_recipes_recipes_groups_limit'] = array(
+      '#type' => 'select',
+      '#title' => t('Limit'),
+      '#options' => array_combine($vals, $vals),
+      '#default_value' => variable_get('xoxo_recipes_recipes_groups_limit', 7)
+    );
+    $f['xoxo_recipes_recipes_groups_link'] = array(
+      '#type' => 'link',
+      '#href' => 'admin/structure/types/manage/recipe/display/in_brand_page',
+      '#title' => t('Single recipe output settings.')
+    );
+  }
+  return $f;
+}
+function xoxo_recipes_block_save($delta = '', $edit = array()) {
+  if ($delta == 'recipes_groups') {
+    variable_set('xoxo_recipes_recipes_groups_limit', $edit['xoxo_recipes_recipes_groups_limit']);
+  }
+}
+//Form.
+function xoxo_recipes_group_form($form, &$form_state, $tid) {
+  $form[$tid] = array(
+    '#type' => 'fieldset',
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    '#title' => taxonomy_term_title(taxonomy_term_load($tid))
+  );
+  return $form;
+}
+function _xoxo_recipes_fridge_form($form, $form_state, $account = FALSE) {
+  $form['fridge'] = array(
+    '#type' => 'container',
+    '#attributes' => array('class' => array('fridge'))
+  );
+  if (!$account) {
+    $account = $GLOBALS['user'];
+  }
+  $q = _xoxo_recipes_fridge(_xoxo_recipes_query(), $account);
+  $q->addField('n', 'nid');
+  $nids = $q->range(0, XOXO_RECIPES_FRIDGE_LIMIT)->execute()->fetchCol();
+  $nodes = node_load_multiple($nids);
+  foreach ($nodes as $node) {
+    $form['fridge'][$node->nid] = node_view($node, 'on_fridge');
+  }
+  return $form;
+}
+//Query.
+function _xoxo_recipes_brand($query, $val = FALSE) {
+  if ($val) {
+    $query->join('field_data_field_recipe_brand', 'brand', 'brand.entity_id=n.nid');
+    $query->condition('brand.field_recipe_brand_nid', $val);
+    return $query;
+  }
+}
+function _xoxo_recipes_fridge($query, $account) {
+  $name = 'fridge';
+  $query->join('flag_content', 'flag', 'n.nid=flag.content_id');
+  $query->join('flags', 'flags', 'flags.fid=flag.fid');
+  $query->condition('flags.name', $name);
+  $query->condition('flag.uid', $account->uid);
+  return $query;
+}

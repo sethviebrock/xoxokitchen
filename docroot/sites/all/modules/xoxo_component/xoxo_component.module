@@ -1,0 +1,173 @@
+<?php
+/**
+ * @file
+ * Code for the xoxo_component feature.
+ */
+
+include_once('xoxo_component.features.inc');
+$p = drupal_get_path('module', 'xoxo_component') . '/';
+require_once $p . 'constants.inc';
+//Drupal.
+function xoxo_component_field_extra_fields() {
+  $l1 = 'Shopping List';
+  $l2 = 'Calendar';
+  $l3 = 'Favorites';
+  $l4 = 'Nutritional Information';
+  $l5 = 'Categorize';
+  $a['node'][XOXO_COMPONENT_TYPE]['display'] = array(
+    'sl' => array(
+      'label' => t($l1),
+      'weight' => -1
+    ),
+    'cal' => array(
+      'label' => t($l2),
+      'weight' => -1
+    ),
+    'fav' => array(
+      'label' => t($l3),
+      'weight' => -1
+    ),
+    'nutr' => array(
+      'label' => t($l4),
+      'weight' => -1
+    ),
+    'cat' => array(
+      'label' => t($l5),
+      'weight' => -1
+    )
+  );
+  return $a;
+}
+//Node.
+/*function xoxo_component_node_presave($node) {
+  if ($node->type != 'component') {
+    return FALSE;
+  }
+  if (_xoxo_component_ks($node) && _xoxo_component_status($node)) {
+    $prev_ks = _xoxo_component_ks($node->original);
+    $prev_pm = _xoxo_component_status($node->original);
+    if ($prev_ks && $prev_pm) {
+      $prev_ks = 0;
+      $prev_pm = 0;
+    }
+    _xoxo_component_ks($node, $prev_ks, FALSE);
+    _xoxo_component_status($node, $prev_pm, FALSE);
+    drupal_set_message(t(XOXO_COMPONENT_TYPEERROR), 'warn');
+  }
+}*/
+function _xoxo_component_component($node) {
+  if (!is_object($node)) {
+    if (!$comp = node_load($node)) {
+      return FALSE;
+    }
+  }
+  if ($comp->type != XOXO_COMPONENT_TYPE) {
+    return FALSE;
+  }
+  return $comp;
+}
+function _xoxo_component_staple($node) {
+  if (!$comp = _xoxo_component_component($node)) {
+    return FALSE;
+  }
+  $ks = _xoxo_component_ks($comp);
+}
+function _xoxo_component_prep_meal($node) {
+  if (!$comp = _xoxo_component_component($node)) {
+    return FALSE;
+  }
+  $pm = _xoxo_component_status($comp);
+}
+function xoxo_component_node_view($node, $view_mode, $langcode) {
+  $sl = 'Add to Shopping List';
+  $cat = 'Categorize';
+  $fav = 'Add to Favorites';
+  $e = array(
+    '#type' => 'html_tag',
+    '#tag' => 'div',
+    '#attributes' => array('class' => array('component-action'))
+  );
+  $a = array('nutr' => 'View Nutritional Information');
+  if (isset($node->content['#groups']['group_component_actions'])) {
+    $g = $node->content['#groups']['group_component_actions'];
+    $g->label = format_string($g->label, array('@title' => $node->title));
+  }
+  if ($node->type == 'component') {
+    $node->content['cal'] = array(
+      '#type' => 'cal_link',
+      '#nid' => $node->nid,
+      '#href' => 'kitchen',
+      '#title' => t(XOXO_COMPONENT_CAL),
+      '#attributes' => array('class' => array('cal', 'component-action'))
+    );
+    $node->content['sl'] = array(
+      '#type' => 'sl_link',
+      '#nid' => $node->nid,
+      '#title' => t($sl),
+      '#attributes' => array('class' => array('sl', 'component-action'))
+    );
+    $node->content['fav'] = $e + array('#value' => flag_create_link('favorite', $node->nid));
+    $node->content['fav']['#attributes']['class'][] = 'fav';
+    $node->content['cat'] = array('#type' => 'cat', '#nid' => $node->nid);
+    foreach($a as $id => $label) {
+      $node->content[$id] = $e + array('#value' => t($label));
+      $node->content[$id]['#attributes']['class'][] = $id;
+    }
+  }
+}
+function _xoxo_component_status($component, $val = FALSE, $save = TRUE) {
+  $f = 'field_component_status';
+  $t = 'node';
+  $k = 'value';
+  $m = 'xoxo_week';
+  $node = is_object($component) ? $component : node_load($component);
+  if ($val !== FALSE) {
+    $p = array(field_language($t, $node, $f), 0, $k);
+    drupal_array_set_nested_value($node->$f, $p, $val, TRUE);
+    if ($save) {
+      node_save($node);
+    }
+    return $node;
+  }
+  else {
+    module_load_include('inc', $m, $m);
+    return _xoxo_first_field_value($component, $f);
+  }
+}
+function _xoxo_component_ks($component, $val = FALSE, $save = TRUE) {
+  $f = 'field_component_ks';
+  $t = 'node';
+  $k = 'value';
+  $m = 'xoxo_week';
+  $node = is_object($component) ? $component : node_load($component);
+  if ($val !== FALSE) {
+    $p = array(field_language($t, $node, $f), 0, $k);
+    drupal_array_set_nested_value($node->$f, $p, $val, TRUE);
+    if ($save) {
+      node_save($node);
+    }
+    return $node;
+  }
+  else {
+    module_load_include('inc', $m, $m);
+    return _xoxo_first_field_value($component, $f);
+  }
+}
+//Form.
+function xoxo_component_form_component_node_form_alter(&$form, &$form_state) {
+  $b = $form['flag']['brand_page'];
+  $form['flag'] = array(
+    '#type' => 'container',
+    '#tree' => TRUE,
+    '#attributes' => array('class' => array('flags'))
+  );
+  $form['flag']['brand_page'] = $b;
+}
+function xoxo_component_field_group_pre_render_alter(&$element) {
+  if ($element['#id'] == 'node_component_in_brand_page_group_component_actions') {
+    $element['#prefix'] = '<div class="bubble-tail"></div>' . $element['#prefix'];
+    $p = drupal_get_path('module', 'xoxo_component') . '/';
+    $element['#attached']['js'][] = $p . 'xoxo_component.js';
+    $element['#attached']['css'][] = $p . 'xoxo_component.css';
+  }
+}

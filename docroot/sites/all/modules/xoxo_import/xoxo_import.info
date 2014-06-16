@@ -1,0 +1,5 @@
+name = XOXO Import
+description = Performs import of XOXO components from CSV-file
+package = Warecorp
+core = 7.x
+version = "7.x-1.x-dev"

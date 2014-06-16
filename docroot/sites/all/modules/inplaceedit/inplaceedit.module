@@ -1,0 +1,289 @@
+<?php
+// info: inplaceedit.module, v1.0 2012/3/7 Segei Churilo
+
+define('INPLACEEDIT_TYPE_TEXT', 'textfield');
+define('INPLACEEDIT_TYPE_TEXTAREA', 'textarea');
+define('INPLACEEDIT_TYPE_SELECT', 'select');
+define('INPLACEEDIT_HASH_SEED', 'dTY!22*7fd');
+define('INPLACEEDIT_EMPTY_TEXT', 'empty');
+
+function inplaceedit_init() {
+  drupal_add_css(
+    '.control-processing {background-image:url('.drupal_get_path('module', 'inplaceedit').'/images/inplaceedit_loader.gif);
+    background-position:center;
+    background-repeat:no-repeat;
+    min-height:16px;min-width:16px;}', 
+    array('type' => 'inline')
+  );
+  drupal_add_js(drupal_get_path('module', 'inplaceedit') .'/js/inplaceedit.js', 'file');  
+}
+
+function inplaceedit_menu() {
+  $items = array();
+
+  $items['ajax/inplaceedit'] = array(
+    'page callback' => '_inplaceedit_ajax_callback',
+    'access arguments' => array('access_inplaceedit'),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+function _inplaceedit_ajax_callback() {
+  $args = $_POST;
+  global $user;
+  $status = FALSE;
+  $response_array = array();
+  
+  if(isset($args['value'], $args['args_raw'], $args['args_crc']) && _inplaceedit_crc_check($args['args_raw'], $args['args_crc'])) {
+    $arguments = drupal_json_decode($args['args_raw']);
+    $control_id = $arguments['@control@'];
+    $value = $args['value'];
+    $prev_value = $args['prev_value'];
+    unset($arguments['@control@']);
+
+    // invoke hook_inplaceedit_perform_changes
+    foreach(module_implements('inplaceedit_perform_changes') as $module) {
+      if(call_user_func($module.'_inplaceedit_perform_changes', $control_id, &$value, &$arguments, $prev_value)) {
+        $status = TRUE;
+      }
+    };
+    $arguments['@control@'] = $control_id;
+    $response_array['status'] = $status;
+    
+    if($status) {
+      $args_json = '';
+      $crc = _inplaceedit_prepare_arguments($arguments, $args_json);
+      $response_array['new_args'] = $args_json;
+      $response_array['new_crc'] = $crc;
+      $response_array['new_value'] = nl2br(check_plain($value));
+    }
+  }
+
+  return drupal_json_output($response_array);
+  exit;
+}
+
+
+/**
+ * Implementation of hook_permission
+ */
+function inplaceedit_permission() {
+  $permissions = array(
+    'access_inplaceedit' => array(
+      'title' => t('Access in-place edit controls'), 
+    ),
+  );
+  // invoke hook_inplaceedit_assign_controls
+  $controls = array();
+  foreach(module_implements('inplaceedit_assign_controls') as $module) {
+    $controls[$module] = call_user_func($module.'_inplaceedit_assign_controls');
+  };
+
+  foreach($controls as $module => $controls2) {
+    $path = drupal_get_path('module', $module).'/'.$module.'.info';
+    $module_info = drupal_parse_info_file($path);
+
+    foreach($controls2 as $control_mn => $control_lb) {
+      $permissions['access_inplaceedit_'.$control_mn] = array(
+        'title' => t(
+          'Access to control <em>@control</em> (<em>@module</em>)', 
+          array(
+            '@control' => $control_lb,
+            '@module' => $module_info['name'],
+          )
+        )
+      );
+    }
+  }
+
+  return $permissions;
+}
+
+function inplaceedit_theme($existing, $type, $theme, $path) {
+  return array(
+    'inplaceedit_textfield' => array(
+      'variables' => array(
+        'control' => NULL,
+        'args' => array(), 
+        'static' => 0,
+        'value' => NULL,
+        'options' => array(
+          'element' => 'div',
+          'class' => '',
+          'id' => '',
+        )
+      ),
+    ),
+    'inplaceedit_textarea' => array(
+      'variables' => array(
+        'control' => NULL,
+        'args' => array(),
+        'static' => 0, 
+        'value' => NULL,
+        'rows' => 3,
+        'cols' => 6,
+        'options' => array(
+          'element' => 'div',
+          'class' => '',
+          'id' => '',
+        )
+      ),
+    ),
+    'inplaceedit_select' => array(
+      'variables' => array(
+        'control' => NULL,
+        'args' => array(),
+        'static' => 0, 
+        'value' => NULL,
+        'select' => array(),
+        'default_item' => NULL,
+        'options' => array(
+          'element' => 'div',
+          'class' => '',
+          'id' => '',
+        )
+      ),
+    ),
+  );
+}
+
+function theme_inplaceedit_textfield($variables) {
+  if(!user_access('access_inplaceedit_'.$variables['control'])) {
+    return $variables['value'];
+  }
+  
+  return _inplaceedit_theme_element(
+    INPLACEEDIT_TYPE_TEXT, 
+    $variables['control'], 
+    $variables['args'], 
+    $variables['value'],
+    $variables['options'],
+    $variables['static']
+  );
+}
+
+function theme_inplaceedit_select($variables) {
+  if(!user_access('access_inplaceedit_'.$variables['control'])) {
+    return $variables['value'];
+  }
+  
+  return _inplaceedit_theme_element(
+    INPLACEEDIT_TYPE_SELECT, 
+    $variables['control'], 
+    $variables['args']+array('@select@' => $variables['select'], '@default_item@' => $variables['default_item']), 
+    $variables['value'],
+    $variables['options'],
+    $variables['static']
+  );
+}
+
+function theme_inplaceedit_textarea($variables) {
+  if(!user_access('access_inplaceedit_'.$variables['control'])) {
+    return $variables['value'];
+  }
+ 
+  return _inplaceedit_theme_element(
+    INPLACEEDIT_TYPE_TEXTAREA, 
+    $variables['control'], 
+    $variables['args'], 
+    $variables['value'],
+    $variables['options'],
+    $variables['static'],
+    array('rows' => 2,'cols' => 5)
+  );
+}
+
+function _inplaceedit_theme_element($type, $control, $args, $value, $options, $static = 0, $extra = array()) {
+  if(!user_access('access_inplaceedit_'.$control)) {
+    $element = $options['element'];
+    unset($options['element']);
+    $content = "<{$element}";
+    _inplaceedit_prepare_element_attributes($control, $type, $content, $options, '-disabled');
+    $content .= "><span class=\"control-value\">{$value}</span></{$element}>";
+    return $content;
+  }
+
+  $element = $options['element'];
+  $empty_class = ($value) ? '' : ' empty-value';
+  unset($options['element']);
+  $args['@control@'] = $control;
+  if($type == INPLACEEDIT_TYPE_SELECT) {
+    $select = $args['@select@'];
+    $defualt_item = $args['@default_item@'];
+    unset($args['@select@']);
+    unset($args['@default_item@']);
+  }
+  
+  $content = "<{$element}";
+  if($static) {
+    $options['class'] = $options['class'].' edit-static';
+  }
+  _inplaceedit_prepare_element_attributes($control, $type, $content, $options);
+ 
+  $args_json = '';
+  $crc = _inplaceedit_prepare_arguments($args, $args_json);
+  
+  $content .= "data-args='{$args_json}' data-crc='{$crc}'>";
+  switch($type) {
+    case INPLACEEDIT_TYPE_TEXT: { 
+      $content .= '<span class="control-value">'.$value.'</span><input style="display:none;" type="text" name="control-text" value="'.$value.'" class="active-control inplaceedit-control-intput input-type-text"/>';
+    } break;
+    case INPLACEEDIT_TYPE_TEXTAREA: { 
+      $content .= '<span style="display:block;" class="control-value'.$empty_class.'">'.((nl2br($value)) ? nl2br($value) : INPLACEEDIT_EMPTY_TEXT ).'</span><textarea rows="'.$extra['rows'].'" cols="'.$extra['cols'].'" style="display:none;" name="control-text" class="active-control inplaceedit-control-intput input-type-textarea">'.$value.'</textarea><input style="display:none;" type="submit" value="Save" class="control-save"/>';
+    } break;
+    case INPLACEEDIT_TYPE_SELECT: { 
+      $default_key = (!is_null($defualt_item)) ? $defualt_item : 0;
+      $content .= '<span key="'.$default_key.'" class="control-value">'.$value.'</span><select style="display:none;" name="control-select" class="active-control inplaceedit-control-intput input-type-select">';
+      foreach($select as $key => $label) {
+        $content .= "<option value=\"{$key}\"";
+        if($defualt_item == $key) {
+          $content .= ' selected="selected"';
+        }
+        $content .= ">{$label}</option>";
+      }
+      $content .= '</select>';
+    } break;
+  }
+  $content .= "</{$element}>";
+  
+  return $content;
+}
+
+function _inplaceedit_prepare_element_attributes($control, $type, &$content, $options, $suffix = '') {
+  foreach($options as $attr_name => $attr_value) {
+    if($attr_name == 'class') {
+      $attr_value = _inplaceedit_element_classes($attr_value, $type, $control, $suffix);
+    }
+    if(!empty($attr_value)) {
+      $content .= ' '.$attr_name.'="'.$attr_value.'"';
+    }
+  }
+}
+
+function _inplaceedit_prepare_arguments($args, &$args_json) {
+  $args_safe = array();
+  foreach($args as $k => $v) {
+   $args_safe[$k] = htmlspecialchars($v);
+  }
+  $args_json = drupal_json_encode($args_safe);
+  return _inplaceedit_crc_encode($args_json);
+}
+
+function _inplaceedit_element_classes($class, $type, $control, $suffix = '') {
+  $classes = "inplaceedit-control{$suffix} control-type-{$type}{$suffix} control-id-{$control}{$suffix}";
+  if($class) {
+    $classes .= " {$class}";
+  }
+  return $classes;
+}
+
+function _inplaceedit_crc_check($str, $crc) {
+  return (_inplaceedit_crc_encode($str) == $crc) ? TRUE : FALSE;
+}
+
+function _inplaceedit_crc_encode($str) {
+  $hash = md5(INPLACEEDIT_HASH_SEED.$str);
+  return substr(md5($hash), 26, 1).substr(md5($hash), 13, 1).substr(md5($hash), 7, 1).substr(md5($hash), 3, 1);
+}

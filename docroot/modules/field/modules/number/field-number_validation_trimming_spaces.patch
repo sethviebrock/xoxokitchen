@@ -1,0 +1,13 @@
+diff --git modules/field/modules/number/number.module modules/field/modules/number/number.module
+index ad55145..4dc5399 100644
+--- modules/field/modules/number/number.module
++++ modules/field/modules/number/number.module
+@@ -370,7 +370,7 @@ function number_field_widget_validate($element, &$form_state) {
+   $instance = field_widget_instance($element, $form_state);
+ 
+   $type = $element['#number_type'];
+-  $value = $element['#value'];
++  $value = trim($element['#value']);
+ 
+   // Reject invalid characters.
+   if (!empty($value)) {

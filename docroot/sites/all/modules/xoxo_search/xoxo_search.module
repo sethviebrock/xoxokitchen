@@ -1,0 +1,102 @@
+<?php
+//We work with forms, strings, AJAX commands, arrays, menu items, database queries, integers (14.08.2012).
+$p = DRUPAL_ROOT . '/' . drupal_get_path('module', 'xoxo_search') . '/';
+require_once $p . 'constants.inc';
+require_once $p . 'xoxo_search.ingredients.inc';
+require_once $p . 'xoxo_search.query.inc';
+require_once $p . 'xoxo_search.description.inc';
+require_once $p . 'xoxo_search.add.inc';
+require_once $p . 'xoxo_search.string.inc';
+require_once $p . 'xoxo_search.brand.inc';
+require_once $p . 'xoxo_search.nid.inc';
+require_once $p . 'xoxo_search.button.inc';
+require_once $p . 'xoxo_search.form.inc';
+//Hacked select input.
+function xoxo_search_js_alter(&$js) {
+  $js['sites/all/modules/xoxo_search/xoxo_search.js']['scope'] = 'footer';
+}
+function _xoxo_search_hacked_input($p, $name) {
+  $p[] = $name;
+  $v = drupal_array_get_nested_value($_POST, $p);
+  return ctype_digit($v) ? $v : FALSE;
+}
+//The widget.
+function xoxo_search_field_widget_info() {
+  return array('xoxo_search' => array(
+    'label' => t('XOXO Search'),
+    'description' => t('Select an ingredient by name, brand and description.'),
+    'field types' => array('ingredients'),
+    'settings' => array()
+  ));
+}
+//The form.
+function xoxo_search_search_form($form = FALSE, &$form_state = FALSE) {
+  $f['xoxo_search_empty_message'] = array(
+    '#type' => 'textfield',
+    '#default_value' => variable_get('xoxo_search_empty_message', FALSE)
+  );
+  return system_settings_form($f);
+}
+//Settings and autocompletes.
+function xoxo_search_menu() {
+  return array(
+    'admin/config/system/xoxo-search' => array(
+      'title' => 'XOXO Search',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('xoxo_search_search_form'),
+      'access arguments' => array('administer site configuration')
+    ),
+    'xoxo-search/names' => array(
+      'title' => 'Names',
+      'page callback' => '_xoxo_search_names',
+      'access callback' => TRUE,
+//      'access arguments' => array('administer site configuration'),
+      'delivery callback' => 'drupal_json_output',
+      'type' => MENU_CALLBACK
+    ),
+    'xoxo-search/descriptions' => array(
+      'title' => 'Descriptions',
+      'page callback' => 'xoxo_search_descriptions',
+      'access callback' => TRUE,
+//      'access arguments' => array('administer site configuration'),
+      'delivery callback' => 'drupal_json_output',
+      'type' => MENU_CALLBACK
+    ),
+    'xoxo-search/json' => array(
+      'title' => 'XOXO Search JSON',
+      'page callback' => '_xoxo_search_json',
+      'delivery callback' => 'drupal_json_output',
+      'type' => MENU_CALLBACK,
+      'access callback' => TRUE
+    )
+  );
+}
+function _xoxo_search_json($message) {
+  $data = isset($_POST['xoxo-search']) ? $_POST['xoxo-search'] : FALSE;
+  if ($message == 'amount-unit') {
+    $def = 'Ct';
+    $am_unit = (array) explode(' ', $data, 2);
+    $amount = isset($am_unit[0]) ? $am_unit[0] : 1;
+    $amount = _xoxo_search_valid_amount($amount);
+    if (isset($am_unit[1])) {
+      $unit = _xoxo_search_tid($am_unit[1]);
+    }
+    $unit = isset($unit) && $unit ? taxonomy_term_title(taxonomy_term_load($unit)) : $def;
+    return array('am_unit' => "$amount $unit");
+  }
+}
+function _xoxo_search_valid_amount($amount) {
+  $am = $amount;
+  if (!is_numeric($am)) {
+    $p = array_map('trim', (array) explode('/', $am));
+    if (count($p) == 2 && is_numeric($p[0]) && is_numeric($p[1])) {
+      $am = $p[0] / $p[1];
+    }
+  }
+  if (empty($am) || !is_numeric($am) || $am <= 0) {
+    return 1;
+  }
+  else {
+    return $amount;
+  }
+}

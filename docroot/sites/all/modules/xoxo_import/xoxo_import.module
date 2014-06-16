@@ -1,0 +1,1266 @@
+<?php
+// info: xoxo_import.module, v1.3 2012/3/11 Segei Churilo
+
+define('XOXO_IMPORT_PACKET', 500);
+define('XOXO_IMPORT_COLS', 78);//94
+define('XOXO_IMPORT_SEPARATOR', ';');
+define('XOXO_IMPORT_CTYPE', 'component');
+define('XOXO_IMPORT_CAT_VID', 2);
+define('XOXO_IMPORT_CAT_ITEM_NAME_VID', 3);
+define('XOXO_IMPORT_UOM_VID', 4);
+define('XOXO_IMPORT_LOG', FALSE);
+define('XOXO_IMPORT_LIMIT_ROWS', 0); // 0 if disable limit
+
+/**
+ * Implementation of hook_init
+ */
+function xoxo_import_init() {
+/*
+variable_del('xoxo_import_error_fids');
+variable_del('xoxo_import_queue_fid');
+variable_del('xoxo_import_context');*/
+}
+
+/**
+ * Implementation of hook_cron
+ */
+function xoxo_import_cron() {
+  module_load_include('inc', 'xoxo_import', 'xoxo_import.kwikee');
+  _xoxo_import_kwikee_cron();
+}
+
+/**
+ * Implementation of hook_permission
+ */
+function xoxo_import_permission() {
+  return array(
+    'administer_xoxo_import' => array(
+      'title' => t('Administer XOXO import'), 
+    ),
+  );
+}
+
+function xoxo_import_menu() {
+  $items = array();
+/*
+  $items['admin/config/development/xoxo-import'] = array(
+    'title' => t('XOXO import CSV'),
+    'description' => 'Settings for XOXO component\'s report',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('_xoxo_import_callback_admin_settings'),
+    'access arguments' => array('administer_xoxo_import'),
+  );*/
+  $items['xoxo-import/delete/%'] = array(
+    'title' => t('Delete file'),
+    'page callback' => 'drupal_get_form', 
+    'page arguments' => array('_xoxo_import_delete_file_form', 2),
+    'access arguments' => array('administer_xoxo_import'),
+  );
+  $items['xoxo-import-kwikee/delete/%'] = array(
+    'title' => t('Delete file'),
+    'page callback' => 'drupal_get_form', 
+    'page arguments' => array('_xoxo_import_kwikee_delete_file_form', 2),
+    'access arguments' => array('administer_xoxo_import'),
+    'file' => 'xoxo_import.kwikee.inc',
+  );
+  $items['xoxo-import/import/%'] = array(
+    'title' => t('Import file'),
+    'page callback' => '_xoxo_import_batch', 
+    'page arguments' => array(2),
+    'access arguments' => array('administer_xoxo_import'),
+  );
+  $items['xoxo-import-kwikee/import/%'] = array(
+    'title' => t('Import file'),
+    'page callback' => '_xoxo_import_kwikee_batch',// _xoxo_import_kwikee
+    'page arguments' => array(2),
+    'access arguments' => array('administer_xoxo_import'),
+    'file' => 'xoxo_import.kwikee.inc',
+  );
+  $items['xoxo-import/process'] = array(
+    'title' => t('Import process'),
+    'page callback' => '_xoxo_import_import_file_process', 
+    'access arguments' => array('administer_xoxo_import'),
+  );
+  $items['xoxo-import-kwikee/process'] = array(
+    'title' => t('Import process'),
+    'page callback' => '_xoxo_import_kwikee_import_file_process', 
+    'access arguments' => array('administer_xoxo_import'),
+  );
+  $items['admin/config/development/xoxo-import-kwikee'] = array(
+    'title' => t('XOXO import Kwikee'),
+    'description' => 'XOXO import Kwikee',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('_xoxo_import_callback_admin_kwikee_settings'),
+    'access arguments' => array('administer_xoxo_import'),
+    'file' => 'xoxo_import.kwikee.inc',
+  );
+  $items['xoxoimport/files'] = array(
+    'title' => 'File download', 
+    'page callback' => 'file_download', 
+    'page arguments' => array('xoxoimport'), 
+    'access callback' => TRUE, 
+    'type' => MENU_CALLBACK,
+  );    
+  return $items;
+} 
+
+/**
+ * Implements hook_theme().
+ *
+ */
+function xoxo_import_theme() {
+  return array(
+    'xoxo_import_files' => array(
+      'variables' => array(
+        'data' => NULL,
+      ),
+    ),
+    'xoxo_import_kwikee_files' => array(
+      'variables' => array(
+        'data' => NULL,
+      ),
+    )
+  );
+}
+
+function theme_xoxo_import_files($vars) {
+  $header = array(t('File'), t('Type') ,t('Date'), t('Status'), t('Operations'));
+  $rows = array();
+  foreach($vars['data'] as $key => $obj) {
+    $ops = array();
+    if(!$obj->status) {
+      $ops['import'] = l(t('import'), 'xoxo-import/import/'.$obj->fid);
+    }
+    $ops['delete'] = l(t('delete'), 'xoxo-import/delete/'.$obj->fid);
+    $rows[] = array(
+      'name' => l($obj->name, file_create_url($obj->uri)),
+      'type' => $obj->type,
+      'date' => format_date($obj->date, 'medium'),
+      'status' => ($obj->status) ? t('imported @items items', array('@items' => $obj->status)) : t('not imported'),
+      'ops' => theme(
+        'item_list',
+        array(
+          'items' => $ops,
+        )
+      ),
+    );
+  }
+  
+  return theme('table', array(
+    'header' => $header, 
+    'rows' => $rows, 
+  ));
+}
+
+function _xoxo_import_callback_admin_settings() {
+  $form = array();
+  $form['xoxo_import_upload_new_file'] = array(
+    '#title' => t('Upload new file'),
+    '#type' => 'fieldset',
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    '#weight' => 2,
+  );
+  $form['xoxo_import_upload_new_file']['xoxo_import_type'] = array(
+    '#title' => t('File type'),
+    '#type' => 'select',
+    '#options' => array(
+      'base' => t('Base'),
+      'update' => t('Update'),
+    )
+  );
+  $form['xoxo_import_upload_new_file']['xoxo_import_file'] = array(
+    '#title' => t('CSV file'),
+    '#type' => 'managed_file',
+    '#description' => t('Upload CSV-file with XOXO components.'),
+    '#default_value' => '',
+    '#upload_location' => 'public://xoxo_import/',
+    '#progress_indicator' => 'throbber',
+    '#upload_validators' => array(
+      'file_validate_extensions' => array('csv'),
+    ),
+  );
+  $files = _xoxo_import_uploaded_files();
+  if(!empty($files)) {
+    $form['xoxo_import_uploaded_files'] = array(
+      '#title' => t('Uploaded files'),
+      '#type' => 'fieldset',
+      '#collapsible' => TRUE,
+      '#collapsed' => FALSE,
+    );
+    $form['xoxo_import_uploaded_files']['table'] = array(
+      '#markup' => theme('xoxo_import_files', array('data' => $files)),
+    );
+  }
+  
+  $form['#submit'][] = '_xoxo_import_callback_admin_settings_submit';
+  
+  return system_settings_form($form);
+}
+
+function _xoxo_import_callback_admin_settings_submit($form, &$form_state) {
+  $file = file_load($form_state['values']['xoxo_import_file']);
+  if($file) {
+    $file->status = FILE_STATUS_PERMANENT;
+    file_save($file);
+    file_usage_add($file, 'xoxo_import', $form_state['values']['xoxo_import_type'], 0);
+    unset($form_state['values']['xoxo_import_file']);
+  }
+}
+
+function _xoxo_import_uploaded_files() {
+  $q = "
+    SELECT
+      {file_managed}.fid        AS fid,
+      {file_managed}.filename   AS name,
+      {file_managed}.uri        AS uri,
+      {file_managed}.timestamp  AS date,
+      {file_usage}.type         AS type,
+      {file_usage}.id           AS status
+    FROM
+      {file_managed}
+    LEFT JOIN
+      {file_usage} ON {file_managed}.fid = {file_usage}.fid
+    WHERE
+      {file_usage}.module = 'xoxo_import'
+    ORDER BY
+      {file_managed}.timestamp
+    DESC";
+  $result = db_query($q)->fetchAll();
+
+  return $result;
+}
+
+function _xoxo_import_delete_file_form($form, $args) {
+  $fid = $args['build_info']['args'][0];
+  $confirm_form = array();
+  $confirm_form['fid'] = array(
+    '#type' => 'value',
+    '#value' => $fid,
+  );
+  $confirm_form['#redirect'] = 'admin/config/development/xoxo-import';
+  $q = "
+    SELECT
+      {file_managed}.filename AS name
+    FROM
+      {file_managed}
+    WHERE
+      {file_managed}.fid = :fid";
+  $filename = db_query($q, array(':fid' => $fid))->fetchField();
+  
+  return confirm_form(
+    $confirm_form, 
+    t('Delete file @fname', array('@fname' => $filename)), 
+    'admin/config/development/xoxo-import', 
+    t('Are You sure want to delete file <em>@fname</em>?', 
+    array('@fname' => $filename)), 
+    t('Delete'), 
+    t('Cancel')
+  );
+}
+
+function _xoxo_import_delete_file_form_submit($form, &$form_state) {
+  if(isset($form_state['values']['fid'])) {
+    $file = file_load($form_state['values']['fid']);
+    variable_del('xoxo_import_kwikee_fid_'.$file->fid);
+    file_delete($file, TRUE);
+    $form_state['redirect'] = array(
+      'admin/config/development/xoxo-import',
+    );
+  }
+}
+
+function _xoxo_import_import_file($fid) {
+  $batch = array(
+    'title' => t('Importing components form csv-file'),
+    'operations' => array(
+      array('_xoxo_import_import_file_process', array($fid)),
+    ),
+    'finished' => '_xoxo_import_import_file_finished',
+    'file' => drupal_get_path('module', 'xoxo_import').'/xoxo_import.module',
+  );
+  batch_set($batch);
+  batch_process('xoxo-import/process');
+}
+
+function _xoxo_import_batch($fid) {
+  $function = '_xoxo_import_batch_set';
+  $batch = $function($fid);
+  batch_set($batch);
+  batch_process();
+}
+
+function _xoxo_import_batch_set($fid) {
+  $operations = array(
+    array(
+      '_xoxo_import_import_file_process', 
+      array($fid),
+    )
+  );
+  $batch = array(
+    'operations' => $operations,
+    'finished' => '_xoxo_import_import_file_finished',
+    'title' => t('Processing import'),
+    'init_message' => t('Import is starting.'),
+    'progress_message' => '',
+    'error_message' => t('Import has encountered an error.'),
+  );
+  return $batch;
+}
+
+function _xoxo_import_import_file_process($fid, &$context) { 
+  $file = file_load($fid);
+  if(!$file) {
+    drupal_set_message(t('Can\'t find file with fid = @fid', array('@fid' => $fid)), 'error');
+    drupal_goto('admin/config/development/xoxo-import');
+  }
+  
+  $file_path = drupal_realpath($file->uri);
+  if(($handle = fopen($file_path, "r")) === FALSE) {
+    drupal_set_message(t('Can\'t read file @path', array('@path' => $file_path)), 'error');
+    drupal_goto('admin/config/development/xoxo-import');
+  }
+  $header = array();
+
+  if(empty($context['sandbox'])) {
+    $context['sandbox'] = array();
+    $data = fgetcsv($handle, 999999, XOXO_IMPORT_SEPARATOR);
+    $num = count($data);
+    if($num != XOXO_IMPORT_COLS) {
+      watchdog('xoxo_import', 'Incorrect column count - @count. It must be @req.', array('@count' => $num, '@req' => XOXO_IMPORT_COLS), WATCHDOG_WARNING);
+      drupal_set_message(
+        t('Incorrect column count - @count. It must be @req.',
+          array('@count' => $num, '@req' => XOXO_IMPORT_COLS)), 'error');
+      drupal_goto('admin/config/development/xoxo-import');
+    }
+    else {
+      $header_watch = array();
+      for ($c = 0; $c < $num; $c++) {
+        $header_item = strtolower(trim($data[$c]));
+        $header_item = str_replace(' - ', '_', strtolower($header_item));
+        $header_item = str_replace(' / ', '_', strtolower($header_item));
+        $header_item = str_replace('-', '_', strtolower($header_item));
+        $header_item = str_replace(' ', '_', strtolower($header_item));
+        $header_item = str_replace('(', '', strtolower($header_item));
+        $header_item = str_replace(')', '', strtolower($header_item));
+        $header[$c] = $header_item;
+        $header_watch[$header_item] = $data[$c];
+      }
+      $context['sandbox']['header'] = $header;
+      
+      // write info to log and variable
+      watchdog(
+        'xoxo_import', 
+        'Column names: <pre>%cols</pre>', 
+        array('%cols' => print_r($header_watch, TRUE)), 
+        WATCHDOG_INFO
+      );
+      variable_set('xoxo_import_header', $header_watch);
+      unset($header_watch);
+    }
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_position'] = ftell($handle);
+    
+    if(XOXO_IMPORT_LIMIT_ROWS) {
+      $context['sandbox']['max'] = XOXO_IMPORT_LIMIT_ROWS;
+    }
+    else {
+      // count lines in file on Linux based system
+      $lines_command = "wc -l {$file_path}";
+      ob_start();
+      $lines = system($lines_command);
+      $lines = explode(' ',$lines);
+      $lines = $lines[0];
+      ob_end_clean();
+      $context['sandbox']['max'] = $lines-1;
+    }
+    
+    $context['sandbox']['starttime'] = time();
+  }
+  
+  if($context['sandbox']['progress']) {
+    fseek($handle, $context['sandbox']['current_position']);
+  }
+
+  $row = 0;
+  while ($row < XOXO_IMPORT_PACKET && $context['sandbox']['progress'] < $context['sandbox']['max'] && ($data = fgetcsv($handle, 999999, XOXO_IMPORT_SEPARATOR)) !== FALSE) {
+    $num = count($data);
+    if($num != XOXO_IMPORT_COLS) {
+       watchdog('xoxo_import', 'Incorrect column count for line #@line - @count. It must be @req.', array('@line' => $context['sandbox']['progress']+2, '@count' => $num, '@req' => XOXO_IMPORT_COLS), WATCHDOG_WARNING);
+    }
+    $row_to_insert = array();
+    for ($c = 0; $c < $num; $c++) {
+      $row_to_insert[$context['sandbox']['header'][$c]] = trim($data[$c]);
+    }
+    // import processing
+    _xoxo_import_import_row($row_to_insert, $context['sandbox']['starttime']);
+
+    $context['sandbox']['progress']++;
+    $time_track = time()-$context['sandbox']['starttime'];
+    $time_per_item_avg = $time_track/$context['sandbox']['progress'];
+    $time_left = round(($context['sandbox']['max']-$context['sandbox']['progress']) * $time_per_item_avg);
+    $context['message'] = t(
+      'Processed @processed out of @all items<br/>Read @bytes bytes from @size<br/>Time elapsed: @elapsed<br/>Time left: @left<br/>@additional',
+      array(
+        '@processed' => $context['sandbox']['progress'],
+        '@all' => $context['sandbox']['max'],
+        '@bytes' => ftell($handle),
+        '@size' => $file->filesize,
+        '@elapsed' => gmdate('z:H:i:s', $time_track),
+        '@left' => gmdate('z:H:i:s', $time_left),
+        '@additional' => $data[5],
+      )
+    );
+    $row++;
+  }
+  $context['sandbox']['current_position'] = ftell($handle);
+  fclose($handle);
+  
+  if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+    $context['finished'] = $context['sandbox']['progress'] / $context['sandbox']['max'];
+  }
+  if($context['sandbox']['progress'] >= $context['sandbox']['max']) {
+    $context['results'] = array(
+      '@processed' => $context['sandbox']['progress'],
+      '@elapsed' => gmdate('z:H:i:s', $time_track),
+      'fid' => $fid,
+    );
+  }
+}
+
+function _xoxo_import_import_file_finished($success, $results, $operations) {
+  if($success) {
+    $message = t(
+      'Import completed successfully!<br/>@processed items imported.<br/>Time spent: @elapsed.',
+      $results
+    );
+    // set status for file as imported
+    $q = "UPDATE {file_usage} SET id = :processed WHERE fid = :fid";
+    db_query($q, array(':processed' => $results['@processed'],':fid' => $results['fid']));   
+  }
+  else {
+    $message = t('Finished with an error.');
+  }
+  
+  drupal_set_message($message);
+  drupal_goto('admin/config/development/xoxo-import');
+}
+
+function _xoxo_import_prepare_title(&$row, &$title) {
+  $title = ($row['description']) ? $row['name'].' ('.$row['description'].')/'.$row['brand'].' ('.$row['manufacturer'].')' : $row['name'].'/'.$row['brand'].' ('.$row['manufacturer'].')';
+  if($row['size']) {
+    $title = $title.'/'.$row['size'].' '.$row['uom'];
+  }
+  elseif($row['i_size']) {
+    $title = $title.'/'.$row['i_size'].' '.$row['i_uom'];
+  }
+
+  if(strlen($title) > 255) {
+    $title = substr($title, 0, 255);
+    return FALSE;
+  }
+  
+  return TRUE;
+}
+
+function _xoxo_import_create_term($name, $vid, $parent = 0, $weight = 0) {
+  // write term data to {taxonomy_term_data} table
+  $q = "
+    INSERT INTO
+      {taxonomy_term_data} 
+      (
+        vid, 
+        name,
+        weight
+       )
+    VALUES
+      (
+        :vid,  
+        :name,
+        :weight
+      );";
+  db_query(
+    $q,
+    array(
+      ':vid' => $vid,
+      ':name' => $name,
+      ':weight' => $weight,
+    )
+  );
+  
+  // get tid
+  $q = "
+    SELECT 
+      td.tid AS tid
+    FROM 
+      {taxonomy_term_data} td
+    ORDER BY
+      tid 
+    DESC 
+    LIMIT 1;";
+  $tid = db_query($q)->fetchField();
+  
+  // write hierarchy info
+  $q = "
+    INSERT INTO
+      {taxonomy_term_hierarchy} 
+      (
+        tid, 
+        parent 
+       )
+    VALUES
+      (
+        :tid,
+        :parent
+      );";
+  db_query(
+    $q,
+    array(
+      ':tid' => $tid,
+      ':parent' => $parent,
+    )
+  );
+  
+  return $tid;
+}
+
+function _xoxo_import_insert_value($table, $field, $value, $nid) {
+  // write record in $table table
+  $q = "
+    INSERT INTO
+      {".$table."}
+      (
+        entity_type,
+        bundle,
+        entity_id,
+        language,
+        delta,
+        ".$field."
+       )
+    VALUES
+      (
+        'node',  
+        '".XOXO_IMPORT_CTYPE."',
+        :nid,
+        'und',
+        0,
+        :value
+      );";
+  db_query(
+    $q,
+    array(
+      ':nid' => $nid,
+      ':value' => $value,
+    )
+  );
+}
+
+function _xoxo_import_get_term_id($vid, $name) {
+  $q = "
+    SELECT 
+      td.tid AS term_id
+    FROM 
+      {taxonomy_term_data} td
+    WHERE
+        (td.name LIKE :name)
+      AND
+        td.vid = ".$vid.";";
+  $tid = db_query(
+    $q,
+    array(
+      ':name' => $name
+    )
+  )->fetchField();
+
+  if(!$tid) {
+    // create term
+    $tid = _xoxo_import_create_term($name, $vid);
+  }
+  
+  return $tid;
+}
+
+function _xoxo_import_remove_unused_columns(&$row, $nid) {
+  unset($row['parent']);
+  unset($row['count']);
+  unset($row['endorsements']);
+  unset($row['country']);
+  unset($row['prepared_notes']);
+  
+  if(!empty($row['upc_e'])) {
+    watchdog('xoxo_import', 'UPC-E is not empty for node %nid', array('%nid' => $nid), WATCHDOG_NOTICE);
+  }
+  
+  unset($row['upc_e']);
+// unset($row['ingredients']);
+// unset($row['warnings']);
+// unset($row['allergy_information']);
+
+}
+
+function _xoxo_import_prepare_float_value(&$value, $nid) {
+  if($value === "") {
+    return;
+  }
+  
+  $value = str_replace(' ', '', $value);
+  $value = str_replace(',', '.', $value);
+  if(strpos($value, '/') !== FALSE) {
+    $from_value = $value;
+    list($left, $right) = explode('/', $value);
+
+    // pattern: "2-1/2" pr "4 3/4"
+    if(strpos($left, ' ') !== FALSE || strpos($left, '-') !== FALSE) {
+      $left = str_replace('-', ' ', $left);
+      list($left0, $left1) = explode(' ', $left);
+      if($right) {
+        $value = $left0 + ($left1/$right);
+      }
+      else {
+        $value = $left0;
+      }
+    }
+    else {
+      if($right) {
+        $value = $left/$right;
+      }
+      else {
+        $value = $left;
+      }
+    }
+    if(XOXO_IMPORT_LOG) {
+      watchdog(
+        'xoxo_import', 
+        '"Division" sign found for node <a href="/node/'.$nid.'">%nid</a>. Converted from "%from_val" to float value "%to_val".', 
+        array(
+          '%nid' => $nid,
+          '%from_val' => $from_value,
+          '%to_val' => $value
+        ), 
+        WATCHDOG_NOTICE
+      );
+    }
+  }
+  elseif(strpos($value, '<') !== FALSE) {
+    $from_value = $value;
+    $value = str_replace('<', '', $value);
+    $value = floatval($value) - 0.0001;
+    
+    if(XOXO_IMPORT_LOG) {
+      watchdog(
+        'xoxo_import', 
+        '"Less than" sign found for node <a href="/node/'.$nid.'">%nid</a>. Converted from "%from_val" to float value "%to_val".', 
+        array(
+          '%nid' => $nid,
+          '%from_val' => $from_value,
+          '%to_val' => $value
+        ), 
+        WATCHDOG_NOTICE
+      );
+    }
+    return;
+  }
+  elseif(strpos($value, '>') !== FALSE) {
+    $from_value = $value;
+    $value = str_replace('>', '', $value);
+    $value = floatval($value) + 0.0001;
+    if(XOXO_IMPORT_LOG) {
+      watchdog(
+        'xoxo_import', 
+        '"More than" sign found for node <a href="/node/'.$nid.'">%nid</a>. Converted from "%from_val" to float value "%to_val".', 
+        array(
+          '%nid' => $nid, 
+          '%from_val' => $from_value,
+          '%to_val' => $value
+        ), 
+        WATCHDOG_NOTICE
+      );
+    }
+    return;
+  }
+  elseif(!is_numeric($value)) {
+    $from_value = $value;
+    $value = floatval($value);
+    if(XOXO_IMPORT_LOG) {
+      watchdog(
+        'xoxo_import', 
+        'Numeric value "%from_val" is not correct for node <a href="/node/'.$nid.'">%nid</a>. Converted to float value "%to_val".', 
+        array(
+          '%nid' => $nid, 
+          '%from_val' => $from_value,
+          '%to_val' => $value
+        ), 
+        WATCHDOG_NOTICE
+      );
+    }
+    return;
+  }
+  
+  $value = floatval($value);
+}
+
+function _xoxo_import_import_row(&$row, &$timestamp){
+  // ********** start "title" field
+  $title = '';
+  $title_check = _xoxo_import_prepare_title($row, $title);
+
+  // write record in {node} table
+  $q = "
+    INSERT INTO
+      {node} 
+      (
+        type,
+        language,
+        title,
+        uid,
+        created,
+        changed
+       )
+    VALUES
+      (
+        '".XOXO_IMPORT_CTYPE."',
+        'und',
+        :title,
+        1,
+        :created,
+        :changed
+      );";
+  db_query(
+    $q,
+    array(
+      ':title' => $title,
+      ':created' => $timestamp,
+      ':changed' => $timestamp,
+    )
+  );
+  
+  // get nid
+  $q = "
+    SELECT 
+      n.nid AS nid
+    FROM 
+      {node} n
+    ORDER BY
+      nid 
+    DESC 
+    LIMIT 1;";
+  $nid = db_query($q)->fetchField();
+  
+  // write record in {node_revision} table
+  $q = "
+    INSERT INTO
+      {node_revision} 
+      (
+        nid,
+        uid,
+        title,
+        log,
+        timestamp
+      )
+    VALUES
+      (
+        :nid,
+        1,
+        :title,
+        '',
+        :timestamp
+      );";
+  db_query(
+    $q,
+    array(
+      ':nid' => $nid,
+      ':title' => $title,
+      ':timestamp' => $timestamp,
+    )
+  );
+  
+  // update vid value in {node} table
+  $q = "
+    UPDATE
+      {node} 
+    SET
+      vid = (
+        SELECT 
+          nv.vid AS vid
+        FROM 
+          {node_revision} nv 
+        ORDER BY
+          vid 
+        DESC 
+        LIMIT 1)
+    WHERE 
+      nid = :nid;";
+  db_query(
+    $q,
+    array(
+      ':nid' => $nid,
+    )
+  );
+  if(!$title_check) {
+    watchdog('xoxo_import', 'Not enough chars for node %nid', array('%nid' => $nid), WATCHDOG_WARNING);
+  }
+  // ********** end "title" field
+  
+  
+  // remove unused columns
+  _xoxo_import_remove_unused_columns($row, $nid);
+  
+  
+  // ********** start field_component_category
+  if($row['category']) {
+    $q = "
+      SELECT 
+        td.tid AS term_id
+      FROM 
+        {taxonomy_term_data} td
+      LEFT JOIN
+        {taxonomy_term_hierarchy} th ON td.tid = th.tid
+      WHERE
+          (td.name LIKE :name)
+        AND
+          td.vid = ".XOXO_IMPORT_CAT_VID."
+        AND
+          th.parent = 0;";
+    $tid = db_query(
+      $q,
+      array(
+        ':name' => $row['category']
+      )
+    )->fetchField();
+
+    if(!$tid){
+      // create term
+      $tid = _xoxo_import_create_term($row['category'], XOXO_IMPORT_CAT_VID);
+    }
+  
+    _xoxo_import_insert_value('field_data_field_component_category', 'field_component_category_tid', $tid, $nid);
+  }
+  unset($row['category']);
+  // ********** end field_component_category
+  
+  // ********** start field_component_upc_a
+  _xoxo_import_insert_value('field_data_field_component_upc_a', 'field_component_upc_a_value', $row['upc_a'], $nid);
+  unset($row['upc_a']);
+  // ********** end field_component_upc_a
+  
+  // ********** start field_component_manufacturer
+  if($row['manufacturer']) {
+    if($row['manufacturer'] > 255) {
+      $row['manufacturer'] = substr($row['manufacturer'], 0, 255);
+      watchdog('xoxo_import', 'Not enough chars for manufacturer name for node %nid', array('%nid' => $nid), WATCHDOG_WARNING);
+    }
+    
+    // check if manufacturer already exists in {xoxo_manufacturers} table
+    $q = "
+      SELECT 
+        xoxo_m.mid AS mid
+      FROM 
+        {xoxo_manufacturers} xoxo_m
+      WHERE
+          xoxo_m.value LIKE :value";
+    $mid = db_query(
+      $q,
+      array(
+        ':value' => $row['manufacturer']
+      )
+    )->fetchField();
+    
+    if(!$mid) {
+      // write record in {xoxo_manufacturers} table
+      $q = "
+        INSERT INTO
+          {xoxo_manufacturers} (value)
+        VALUES (:value);";
+      db_query(
+        $q,
+        array(
+          ':value' => $row['manufacturer'],
+        )
+      );
+      
+      // get latest mid
+      $q = "
+        SELECT 
+          xoxo_m.mid AS mid
+        FROM 
+          {xoxo_manufacturers} xoxo_m 
+        ORDER BY
+          mid 
+        DESC 
+        LIMIT 1;";
+      $mid = db_query($q)->fetchField();
+    }
+    
+    _xoxo_import_insert_value('field_data_field_component_manufacturer', 'field_component_manufacturer_value', $mid, $nid);
+  }
+  unset($row['manufacturer']);
+  // ********** end field_component_manufacturer
+  
+  // ********** start field_component_brand
+  if($row['brand']) {
+    if($row['brand'] > 255) {
+      $row['brand'] = substr($row['brand'], 0, 255);
+      watchdog('xoxo_import', 'Not enough chars for brand name for node %nid', array('%nid' => $nid), WATCHDOG_WARNING);
+    }
+    
+    // check if brand already exists in {xoxo_brands} table
+    $q = "
+      SELECT 
+        xoxo_b.bid AS bid
+      FROM 
+        {xoxo_brands} xoxo_b
+      WHERE
+          xoxo_b.value LIKE :value";
+    $bid = db_query(
+      $q,
+      array(
+        ':value' => $row['brand']
+      )
+    )->fetchField();
+    
+    if(!$bid) {
+      // write record in {xoxo_brands} table
+      $q = "
+        INSERT INTO
+          {xoxo_brands} (value)
+        VALUES (:value);";
+      db_query(
+        $q,
+        array(
+          ':value' => $row['brand'],
+        )
+      );
+      
+      // get latest bid
+      $q = "
+        SELECT 
+          xoxo_b.bid AS bid 
+        FROM 
+          {xoxo_brands} xoxo_b
+        ORDER BY
+          bid 
+        DESC 
+        LIMIT 1;";
+      $bid = db_query($q)->fetchField();
+    }
+    
+    _xoxo_import_insert_value('field_data_field_component_brand', 'field_component_brand_value', $bid, $nid);
+  }
+  unset($row['brand']);
+  // ********** end field_component_brand
+  
+  // ********** start field_component_name
+  if($row['name']) {
+    if($row['name'] > 255) {
+      $row['name'] = substr($row['name'], 0, 255);
+      watchdog('xoxo_import', 'Not enough chars for component name for node %nid', array('%nid' => $nid), WATCHDOG_WARNING);
+    }
+    
+    // check if name already exists in {xoxo_names} table
+    $q = "
+      SELECT 
+        xoxo_n.aid AS aid
+      FROM
+        {xoxo_names} xoxo_n
+      WHERE
+          xoxo_n.value LIKE :value";
+    $aid = db_query(
+      $q,
+      array(
+        ':value' => $row['name']
+      )
+    )->fetchField();
+    
+    if(!$aid) {
+      // write record in {xoxo_brands} table
+      $q = "
+        INSERT INTO
+          {xoxo_names} (value)
+        VALUES (:value);";
+      db_query(
+        $q,
+        array(
+          ':value' => $row['name'],
+        )
+      );
+      
+      // get latest aid
+      $q = "
+        SELECT 
+          xoxo_n.aid AS aid 
+        FROM 
+          {xoxo_names} xoxo_n
+        ORDER BY
+          aid 
+        DESC 
+        LIMIT 1;";
+      $aid = db_query($q)->fetchField();
+    }
+    
+     _xoxo_import_insert_value('field_data_field_component_name', 'field_component_name_value', $aid, $nid);
+  }
+  unset($row['name']);
+  // ********** end field_component_name
+  
+  // ********** start field_component_description
+  _xoxo_import_insert_value('field_data_field_component_description', 'field_component_description_value', $row['description'], $nid);
+  unset($row['description']);
+  // ********** end field_component_description
+  
+  
+  // ********** start field_component_cat_item_name
+  // search for term
+ /* if($row['categorized_item_name']) {
+    $tid = _xoxo_import_get_term_id(XOXO_IMPORT_CAT_ITEM_NAME_VID, $row['categorized_item_name']);
+    _xoxo_import_insert_value('field_data_field_component_cat_item_name', 'field_component_cat_item_name_tid', $tid, $nid);
+  }
+  unset($row['categorized_item_name']);*/
+  // ********** end field_component_cat_item_name
+  
+
+  // ********** start field_component_uom
+  // search for term
+  if($row['uom']) {
+    $tid = _xoxo_import_get_term_id(XOXO_IMPORT_UOM_VID, $row['uom']);
+    _xoxo_import_insert_value('field_data_field_component_uom', 'field_component_uom_tid', $tid, $nid);
+    
+    if($row['size'] !== "") {
+      _xoxo_import_prepare_float_value($row['size'], $nid);
+      _xoxo_import_insert_value('field_data_field_component_size', 'field_component_size_value', $row['size'], $nid);
+    }  
+  }
+  unset($row['uom']);
+  // ********** end field_component_uom
+  
+  
+  // ********** start field_component_size
+  unset($row['size']);
+  // ********** end field_component_size
+  
+  // ********** start field_component_l_uom
+  // search for term
+  if($row['i_uom']) {
+    $tid = _xoxo_import_get_term_id(XOXO_IMPORT_UOM_VID, $row['i_uom']);
+    _xoxo_import_insert_value('field_data_field_component_l_uom', 'field_component_l_uom_tid', $tid, $nid);
+    if($row['i_size'] !== "") {
+      _xoxo_import_prepare_float_value($row['i_size'], $nid);
+      _xoxo_import_insert_value('field_data_field_component_l_size', 'field_component_l_size_value', $row['i_size'], $nid);
+    }
+  }
+  unset($row['i_uom']);
+  // ********** end field_component_l_uom
+
+  // ********** start field_component_l_size
+  unset($row['i_size']);
+  // ********** end field_component_l_size
+
+  
+  // ********** start field_component_serving_size_uom
+  // search for term
+  if($row['serving_size_uom']) {
+    $tid = _xoxo_import_get_term_id(XOXO_IMPORT_UOM_VID, $row['serving_size_uom']);
+    _xoxo_import_insert_value('field_data_field_component_serving_size_uom', 'field_component_serving_size_uom_tid', $tid, $nid);
+    if($row['serving_size'] !== "") {
+      _xoxo_import_prepare_float_value($row['serving_size'], $nid);
+      _xoxo_import_insert_value('field_data_field_component_serving_size', 'field_component_serving_size_value', $row['serving_size'], $nid);
+    }
+  }
+  unset($row['serving_size_uom']);
+  // ********** end field_component_serving_size_uom
+  
+  // ********** start field_component_serving_size
+  unset($row['serving_size']);
+  // ********** end field_component_l_size
+  
+
+
+  // ********** start field_component_l_serving_size_u
+  // search for term
+  if($row['i_serving_size_uom']) {
+    $tid = _xoxo_import_get_term_id(XOXO_IMPORT_UOM_VID, $row['i_serving_size_uom']);
+    _xoxo_import_insert_value('field_data_field_component_l_serving_size_u', 'field_component_l_serving_size_u_tid', $tid, $nid);
+    if($row['i_serving_size'] !== "") {
+      _xoxo_import_prepare_float_value($row['i_serving_size'], $nid);
+      _xoxo_import_insert_value('field_data_field_component_l_serving_size', 'field_component_l_serving_size_value', $row['i_serving_size'], $nid);
+    }
+  }
+  unset($row['i_serving_size_uom']);
+  // ********** end field_component_l_serving_size_u
+  
+  // ********** start field_component_l_serving_size
+  unset($row['i_serving_size']);
+  // ********** end field_component_l_serving_size
+  
+  // ********** start field_component_package
+  $cid = 0;
+  if($row['container']) {
+    // check if container already exists in {xoxo_containers} table
+    $q = "
+      SELECT 
+        xoxo_c.cid AS cid
+      FROM
+        {xoxo_containers} xoxo_c
+      WHERE
+          xoxo_c.value LIKE :value";
+    $cid = db_query(
+      $q,
+      array(
+        ':value' => $row['container']
+      )
+    )->fetchField();
+    
+    if(!$cid) {
+      // write record in {xoxo_containers} table
+      $q = "
+        INSERT INTO
+          {xoxo_containers} (value)
+        VALUES (:value);";
+      db_query(
+        $q,
+        array(
+          ':value' => $row['container'],
+        )
+      );
+      
+      // get latest cid
+      $q = "
+        SELECT 
+          xoxo_c.cid AS cid 
+        FROM 
+          {xoxo_containers} xoxo_c
+        ORDER BY
+          cid 
+        DESC 
+        LIMIT 1;";
+      $cid = db_query($q)->fetchField();
+    }
+  }
+  _xoxo_import_prepare_float_value($row['servings_per_container'], $nid);
+  $package = serialize(
+    array(
+     // 'pieces' => $row['pieces'],
+      'servings_per_container' => $row['servings_per_container'],
+      'container' => $cid,
+    )
+  );
+
+  _xoxo_import_insert_value('field_data_field_component_package', 'field_component_package_value', $package, $nid);
+  
+  unset($row['container']);
+//  unset($row['pieces']);
+  unset($row['servings_per_container']);
+  // ********** end field_component_package
+  
+  
+  // ********** start field_component_nutritional
+  foreach($row as $k => &$v) {
+    if($v === '') {
+      unset($row[$k]);
+    }
+    else {
+     // $v = (float)str_replace(',', '.', $v); 
+      _xoxo_import_prepare_float_value($v, $nid); 
+    }
+  }
+  _xoxo_import_insert_value('field_data_field_component_nutritional', 'field_component_nutritional_value', serialize($row), $nid);
+  // ********** end field_component_nutritional
+}
+
+
+/*
+
+DELETE `node_revision` 
+FROM `node_revision` 
+INNER JOIN `node` ON node.nid = node_revision.nid
+WHERE node.type = 'component';
+
+DELETE FROM `node` WHERE `type` = 'component';
+
+DELETE `taxonomy_term_hierarchy`
+FROM `taxonomy_term_hierarchy` 
+INNER JOIN `taxonomy_term_data` ON taxonomy_term_data.tid = taxonomy_term_hierarchy.tid
+WHERE taxonomy_term_data.vid IN (2,3,4);
+
+DELETE FROM `taxonomy_term_data` WHERE vid IN (2,3,4);
+
+TRUNCATE TABLE `field_data_field_component_id`;
+TRUNCATE TABLE `field_data_field_component_category`;
+TRUNCATE TABLE `field_data_field_component_upc_a`;
+TRUNCATE TABLE `field_data_field_component_description`;
+TRUNCATE TABLE `field_data_field_component_cat_item_name`;
+TRUNCATE TABLE `field_data_field_component_size`;
+TRUNCATE TABLE `field_data_field_component_uom`;
+TRUNCATE TABLE `field_data_field_component_l_size`;
+TRUNCATE TABLE `field_data_field_component_l_uom`;
+TRUNCATE TABLE `field_data_field_component_serving_size`;
+TRUNCATE TABLE `field_data_field_component_serving_size_uom`;
+TRUNCATE TABLE `field_data_field_component_l_serving_size`;
+TRUNCATE TABLE `field_data_field_component_l_serving_size_u`;
+TRUNCATE TABLE `field_data_field_component_package`;
+TRUNCATE TABLE `field_data_field_component_nutritional`;
+TRUNCATE TABLE `field_data_field_component_manufacturer`;
+TRUNCATE TABLE `field_data_field_component_brand`;
+TRUNCATE TABLE `field_data_field_component_name`;
+
+TRUNCATE TABLE `xoxo_manufacturers`;
+TRUNCATE TABLE `xoxo_containers`;
+TRUNCATE TABLE `xoxo_brands`;
+TRUNCATE TABLE `xoxo_names`;
+
+UPDATE `file_usage` SET id = 0 WHERE fid = 198;
+ */
+
+function _xoxo_other_components() {
+  $q = "
+    SELECT 
+      n.nid AS nid,
+      n.title AS title
+    FROM 
+      {node} n
+    LEFT JOIN 
+      {field_data_field_component_category} f ON f.entity_id = n.nid
+    LEFT JOIN
+      {taxonomy_term_data} t ON f.field_component_category_tid = t.tid
+    WHERE
+      f.field_component_category_tid = 2321
+    ORDER BY
+      nid 
+    ASC";
+  $data = db_query($q)->fetchAll();
+  kpr($data);
+}
+
+function xoxo_import_stream_wrappers() {
+    $wrapper = array();
+    if (variable_get('xoxo_import_path', FALSE)) {
+        $wrapper['xoxoimport'] = array(
+          'name' => t('XOXO import files'), 
+          'class' => 'DrupalXoxoImportStreamWrapper', 
+          'description' => t('Private XOXO import local files'), 
+          'type' => STREAM_WRAPPERS_LOCAL_NORMAL,
+        );
+    }
+    return $wrapper;
+}
+
+function xoxo_import_file_download($uri) {
+  if (file_uri_scheme($uri) == 'xoxoimport') {
+    if (!user_access('administer_xoxo_import')) {
+      return -1;
+    }
+    else {
+      $mime = file_get_mimetype($uri);
+      return array('Content-Type' => $mime);
+    }
+  }
+}
+class DrupalXoxoImportStreamWrapper extends DrupalLocalStreamWrapper {
+  public function getDirectoryPath() {
+    return variable_get('xoxo_import_path', '');
+  }
+  
+  function getExternalUrl() {
+    $path = str_replace('\\', '/', $this->getTarget());
+    return url('xoxoimport/files/' . $path, array('absolute' => TRUE));
+  }
+}

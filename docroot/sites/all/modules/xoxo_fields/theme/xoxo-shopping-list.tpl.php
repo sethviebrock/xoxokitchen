@@ -1,0 +1,1 @@
+<?php print $component_title; ?> | <?php print $qty; ?> | <?php print $uom; ?> | <?php print $user_name; ?> | <?php print $last_added; ?> | <?php print $status; ?>

@@ -1,0 +1,268 @@
+<?php
+/**
+ * @file
+ * Code for the xoxo_kitchen feature.
+ */
+
+include_once('xoxo_kitchen.features.inc');
+//Drupal.
+function xoxo_kitchen_element_info() {
+  $l = array(1 => 'drupal_pre_render_link', 2 => 'drupal_pre_render_markup');
+  $t['cal_link']['#pre_render'] = array_merge(array('_xoxo_kitchen_cal_link'), $l);
+  $t['sl_link']['#pre_render'] = array_merge(array('_xoxo_kitchen_sl_link'), $l);
+  $t['cat']['#pre_render'] = array('_xoxo_kitchen_cat_element');
+  $t['cat']['#process'] = array('form_process_container');
+  $t['cat']['#nid'] = 0;
+  $t['cat']['#vid'] = FALSE;
+  $t['cal_link']['#nid'] = 0;
+  $t['sl_link']['#nid'] = 0;
+  return $t;
+}
+function xoxo_kitchen_menu() {
+  return array(
+    'add-to-calendar/%node/%/%/%' => array(
+      'title' => 'Add to Calendar',
+      'page callback' => '_xoxo_kitchen_add_to_calendar',
+      'page arguments' => array(1, 2, 3, 4),
+      'access arguments' => array('access content'),
+      'type' => MENU_CALLBACK
+    ),
+    'add-to-sl/%node' => array(
+      'title' => 'Add to Shopping List',
+      'page callback' => '_xoxo_kitchen_sl',
+      'page arguments' => array(1),
+      'access arguments' => array('access content'),
+      'delivery callback' => 'ajax_deliver',
+      'type' => MENU_CALLBACK
+    )
+  );
+}
+//Form.
+function _xoxo_kitchen_cat_element($element) {
+  $class = 'categorize';
+  $sep = '-';
+  $nid = $element['#nid'];
+  $path = drupal_get_path('module', 'xoxo_kitchen') . '/';
+  $vid = $element['#vid'] ? $element['#vid'] : _xoxo_kitchen_vid($nid);
+  $flag = _xoxo_kitchen_flag(node_load($nid), $vid);
+  list($flagged, $label, $name) =
+    is_object($flag)
+    ? array($flag->is_flagged($nid), $flag->flag_short, $flag->name)
+    : array(FALSE, FALSE, FALSE);
+  $element['#theme_wrappers'][] = 'container'; 
+  $element['#attributes']['class'][] = $class;
+  $element['#attributes']['class'][] = $class . $sep . $nid;
+  $element['#attributes']['class'][] = $class . $sep . ($flagged ? 'added' : 'removed');
+  $element['#attached']['js'][] = $path . 'xoxo_kitchen.categorize.js';
+  $element['#attached']['css'][] = $path . 'xoxo_kitchen.css';
+  $element['add'] = array(
+    '#theme' => 'views_drag_drop_operations',
+    '#event' => 'click',
+    '#args' => array('nid' => $nid, 'categorize' => TRUE),
+    '#content' => $label,
+    '#preset' => 'vocabulary',
+    '#delta' => $vid
+  );
+  $element['remove'] = array('#markup' => flag_create_link($name, $nid));
+  return $element;
+}
+function _xoxo_kitchen_sl_link($element) {
+  $element['#attached']['library'][] = array('system', 'drupal.ajax');
+  $element['#attributes']['class'][] = 'use-ajax';
+  $element['#href'] = 'add-to-sl/' . $element['#nid'] . '/nojs';
+  return $element;
+}
+function _xoxo_kitchen_cal_link($element) {
+  $i = '<input type="text" class="recipe-add-to-calendar-input" />';
+  $path = drupal_get_path('module', 'xoxo_kitchen') . '/';
+  $id = drupal_html_id('cal-link');
+  $nid = $element['#nid'];
+  $ws = date('w') == 0 ? strtotime('today', time()) : strtotime('last Sunday', time());
+  $element['#id'] = $id;
+  $element['#title'] .= $i;
+  $element['#options']['html'] = TRUE;
+  $element['#attached']['library'][] = array('system', 'ui.datepicker');
+  $element['#attached']['css'][] = $path . 'xoxo_kitchen.css';
+  $element['#attached']['js'][] = $path . 'xoxo_kitchen.calendar.js';
+  $reg = array(
+    'calLinks' => array(array(
+      'nid' => $nid,
+      'id' => $id,
+      'exceptions' => _xoxo_kitchen_calendar_exceptions($nid, $ws)
+    ))
+  );
+  $element['#attached']['js'][] = array(
+    'type' => 'setting',
+    'data' => array('xoxoKitchen' => $reg + array(
+      'day' => date('j', $ws),
+      'month' => date('n', $ws),
+      'year' => date('Y', $ws)
+    ))
+  );
+  return $element;
+}
+//Node.
+function _xoxo_kitchen_flag($node, $vid = FALSE) {
+  $fl1 = 'added_to_my_staples';
+  $fl2 = 'added_to_my_kitchen';
+  $vid1 = 11;
+  $vid2 = 20;
+  $vid = $vid ? $vid : _xoxo_kitchen_vid($node);
+  if ($vid == $vid2) {
+    return flag_get_flag($fl1);
+  }
+  else if ($vid == $vid1) {
+    return flag_get_flag($fl2);
+  }
+}
+function _xoxo_kitchen_vid($node) {
+  $f1 = 'field_component_sc';
+  $f2 = 'field_componets_meal_type';
+  $p = array('settings', 'allowed_values', 0);
+  $f = '';
+  if (_xoxo_component_status($node)) {
+    $f = $f2;
+  }
+  else if (_xoxo_component_ks($node)){
+    $f = $f1;
+  }
+  if ($f) {
+    $info = field_info_field($f);
+    $voc = drupal_array_get_nested_value($info, array_merge($p, array('vocabulary')));
+    $q = db_select('taxonomy_vocabulary', 'voc')->condition('voc.machine_name', $voc);
+    $q->addField('voc', 'vid');
+    return $q->execute()->fetchField();
+  }
+}
+function _xoxo_kitchen_sl($node) {
+  $args = array(
+    'field_event_date' => time(),
+    'field_event_recipes' => $node->nid,
+    '@marked_on_hand' => FALSE,
+    '@qty' => FALSE,
+    '@uom' => FALSE,
+    '@type' => $node->type
+  );
+  _xoxo_fields_add_components_to_shopping_list(0, $args);
+}
+function _xoxo_kitchen_add_to_calendar($node, $month, $day, $year) {
+  $date = implode('/', array($month, $day, $year));
+  $timestamp = strtotime($date);
+  $cat = _xoxo_fields_prepare_cat_tid($node);
+  $tid = $cat['tid'];
+  $event_nid = _xoxo_fields_find_event_by_date($timestamp, $tid);
+  $args = array(
+    'preset' => 'calendar',
+    'drag_args' => array('field_event_recipes' => $node->nid),
+    'drop_args' => array(
+      'field_event_date' => $timestamp,
+      'field_event_category' => $tid,
+      '@date' => $date,
+      '@category' => $cat['label']
+    ),
+  );
+  if($event_nid) {
+    $args['drop_args']['nid'] = $event_nid;
+  }
+  _views_drag_drop_ajax_callback(FALSE, $args);
+}
+function _xoxo_kitchen_calendar_exceptions($recipe_nid, $init_date = NULL, $uid = NULL) {
+  if(is_null($uid)) {
+    global $user;
+    $uid = $user->uid;
+  }
+
+  $recipe = node_load($recipe_nid);
+
+  $tid = _xoxo_fields_prepare_cat_tid($recipe);
+  $tid = $tid['tid'];
+
+  $days = array();
+  $q = "
+    SELECT DISTINCT
+      f.field_event_date_value AS date
+    FROM
+      node n
+    LEFT JOIN
+      field_data_field_event_recipes r ON r.entity_id = n.nid
+    LEFT JOIN
+      field_data_field_event_category c ON c.entity_id = n.nid
+    LEFT JOIN
+      field_data_field_event_date f ON f.entity_id = n.nid
+    WHERE
+        n.uid = :uid
+      AND
+        c.field_event_category_tid = :tid
+      AND
+        (r.field_event_recipes_nid = :recipe_nid OR r.delta = 4)
+      AND
+        f.field_event_date_value >= :init_date
+    ORDER BY
+      f.field_event_date_value
+    ASC";
+
+  $result = db_query(
+    $q,
+    array(
+      ':uid' => $uid,
+      ':recipe_nid' => $recipe_nid,
+      ':init_date' => $init_date,
+      ':tid' => $tid,
+    )
+  )->fetchAll();
+
+  foreach($result as $obj) {
+    $days[] = date('n/j/Y', $obj->date);
+  }
+
+  return $days;
+}
+//Views Drag & Drop Operations configuration.
+function xoxo_kitchen_views_drag_drop_assign_actions(&$config, $args) {
+  $vid1 = 11;
+  $vid2 = 20;
+  $prefix = 'cat_';
+  $terms = array_merge(
+    taxonomy_get_tree($vid1),
+    taxonomy_get_tree($vid2)
+  );
+  foreach ($terms as $term) {
+    $config[$prefix . $term->tid] = array(
+      'content' => $term->name,
+      'status' => 1,
+      'preset' => 'vocabulary',
+      'delta' => $term->vid
+    );
+  }
+/*  if (isset($args['nid'])) {
+    $selected = _xoxo_fields_tid($args['nid'], $GLOBALS['user']->uid);
+    $config[$prefix . $selected]['classes'] = 'current-category';
+  }*/
+}
+function xoxo_kitchen_views_drag_drop_perform_actions($action, &$output, &$new_action, $preset, &$args, &$options) {
+  $class = 'categorize';
+  $sep = '-';
+  $fl1 = 'added_to_my_staples';
+  $prefix = 'cat_';
+  $isit = isset($args['categorize']) ? $args['categorize'] : FALSE;
+  global $user;
+  $term = taxonomy_term_load(str_replace($prefix, '', $action));
+  $node = node_load(isset($args['nid']) ? $args['nid'] : 0);
+  $flag = _xoxo_kitchen_flag($node);
+  if (!$isit || !$term || !$node || !$flag) {
+    return FALSE;
+  }
+//  flag('flag', $flag->name, $node->nid);
+  $options['custom_trigger_element'] = '.' . $class . $sep . $node->nid;
+  $options['custom_trigger_event'] = 'xoxoKitchenCategorizeAdded';
+  $db_fields = $db_key = array('uid' => $user->uid, 'nid' => $node->nid);
+  $db_fields['tid'] = $term->tid;
+  if (in_array(FALSE, $fields)) {
+    return FALSE;
+  }
+  db_merge('xoxo_fields_taxonomy')->key($db_key)->fields($db_fields)->execute();
+  if ($flag->name == $fl1) {
+    _xoxo_component_ks($node, 1);
+  }
+  return TRUE;
+}

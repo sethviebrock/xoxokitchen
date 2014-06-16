@@ -1,0 +1,77 @@
+<?php
+//Addition of prerendering function to user profile form.
+function account_divider_form_alter(&$form, &$form_state, $form_id) {
+  if(in_array($form_id, array('user_profile_form', 'user_register_form'))) {
+    if(!array_key_exists('#pre_render', $form)) {
+      $form['#pre_render'] = array();
+    }
+    $first = array_shift($form['#pre_render']);
+    array_unshift($form['#pre_render'], '_xoxo_with_account');
+    array_unshift($form['#pre_render'], $first);
+  }
+}
+//Two extra fields containing pieces of account information.
+function account_divider_field_extra_fields() {
+  $e['user']['user']['form'] = array(
+    'mail' => array(
+      'label' => t('Email'),
+      'description' => t('User\'s email address.'),
+      'weight' => -10
+    ),
+    'password' => array(
+      'label' => t('Password'),
+      'description' => t('User\'s password.'),
+      'weight' => -10
+    ),
+    'notify' => array(
+      'label' => t('Notify'),
+      'description' => t('Whether to notify a user of new account.'),
+      'weight' => -10
+    ),
+    'status' => array(
+      'label' => t('Status'),
+      'description' => t('User\'s status.'),
+      'weight' => -10
+    ),
+    'roles' => array(
+      'label' => t('Roles'),
+      'description' => t('User\'s roles.'),
+      'weight' => -10
+    )
+  );
+  return $e;
+}
+//Account data group contains only name now. Treating all of it as name.
+function account_divider_field_extra_fields_alter(&$info) {
+  $info['user']['user']['form']['account']['label'] = t('Username');
+  $info['user']['user']['form']['account']['description'] = t('User\'s name.');
+}
+//Form with additional extra fields.
+function _xoxo_with_account($element) {
+  $info = field_info_extra_fields('user', 'user', 'form');
+  $password = array('#weight' => $info['password']['weight']);
+  foreach(array(
+    'pass',
+    'current_pass_required_values',
+    'current_pass'
+  ) as $key) {
+    if(array_key_exists($key, $element['account'])) {
+      $password[] = $element['account'][$key];
+      unset($element['account'][$key]);
+    }
+  }
+  foreach(array(
+    'mail',
+    'status',
+    'roles',
+    'notify'
+  ) as $key) {
+    if(array_key_exists($key, $element['account'])) {
+      $element[$key] = $element['account'][$key];
+      $element[$key]['#weight'] = $info[$key]['weight'];
+      unset($element['account'][$key]);
+    }
+  }
+  $element['password'] = $password;
+  return $element;
+}

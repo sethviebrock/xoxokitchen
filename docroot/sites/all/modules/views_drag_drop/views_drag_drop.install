@@ -1,0 +1,22 @@
+<?php
+// info: views_drag_drop.install, v1.0 2012/2/13 Segei Churilo
+
+/**
+ * @file views_drag_drop.install
+ * Contains install and update functions for views_drag_drop.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function views_drag_drop_install() {
+  
+}
+
+
+/**
+ * Implements hook_uninstall().
+ */
+function views_drag_drop_uninstall() {
+  variable_del('views_drag_drop_settings');
+}

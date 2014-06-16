@@ -1,0 +1,4 @@
+name = XOXO Pager
+description = AJAX reload of shopping list.
+core = 7.x
+package = Warecorp

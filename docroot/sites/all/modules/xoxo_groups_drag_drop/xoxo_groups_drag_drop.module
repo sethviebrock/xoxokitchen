@@ -1,0 +1,48 @@
+<?php
+define('XOXO_GROUPS_DRAG_DROP_SORT',
+  'REPLACE INTO {xoxo_groups_drag_drop} VALUES (:nid, :tid, :weight)');
+function xoxo_groups_drag_drop_field_attach_view_alter(&$output, $context) {
+  if(array_key_exists('field_shopping_list_items', $output)) {
+    $p = drupal_get_path('module', 'xoxo_groups_drag_drop') . '/';
+    $a = &$output['field_shopping_list_items']['#attached'];
+    $a['js'][] = $p . 'xoxo_groups_drag_drop.js';
+    $a['css'][] = $p . 'xoxo_groups_drag_drop.css';
+  }
+}
+function xoxo_groups_drag_drop_menu() {
+  $i['xoxo-groups-drag-drop'] = array(
+    'title' => 'Groups sorting.',
+    'access callback' => '_xoxo_groups_drag_drop_check',
+    'access arguments' => array(1),
+    'page callback' => '_xoxo_groups_drag_drop_sort',
+    'delivery callback' => 'drupal_json_output',
+    'type' => MENU_CALLBACK
+    );
+  return $i;
+}
+function xoxo_groups_drag_drop_node_delete($node) {
+  if ($node->type == 'shopping_list') {
+    db_delete('xoxo_groups_drag_drop')
+      ->condition('nid', $node->nid)
+      ->execute();
+  }
+}
+function _xoxo_groups_drag_drop_sort($nid) {
+  $tids = func_get_args();
+  array_shift($tids);
+  $weight = 1;
+  foreach($tids as $tid) {
+    db_query(XOXO_GROUPS_DRAG_DROP_SORT, array(
+      ':nid' => (int) $nid,
+      ':tid' => (int) $tid,
+      ':weight' => $weight));
+    $weight++;
+  }
+  return $tids;
+}
+function _xoxo_groups_drag_drop_check($nid) {
+  $node = node_load($nid);
+  $uid = $node ? $node->uid : FALSE;
+  global $user;
+  return $uid == $user->uid;
+}

@@ -1,0 +1,4 @@
+name = XOXO Components
+description = Handle plurality of components (prepared meals, ingredients, staples). Filtering, representation and other.
+core = 7.x
+package = Warecorp

@@ -1,0 +1,5 @@
+name = Form Theming
+description = My Form Theming.
+core = 7.x
+
+files[] = theming_form.module

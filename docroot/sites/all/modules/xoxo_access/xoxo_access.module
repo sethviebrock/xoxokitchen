@@ -1,0 +1,137 @@
+<?php
+require_once 'xoxo_access.inc';
+// info: xoxo_access.module, v1.0 2012/3/22 Segei Churilo
+/*
+ *
+ * Field access.
+ * @return boolean
+ *
+ */
+function xoxo_access_field_access($op, $field, $entity_type, $entity, $account) {
+  if($field['field_name'] === 'field_recipe_status') {
+    if($op === 'edit') {
+      return _xoxo_access_change_status($entity);
+    }
+    if($op === 'view') {
+      return FALSE;
+    }
+  }
+}
+/*
+ * Implementation of hook_permission
+ */
+function xoxo_access_permission() {
+  $permissions = array(
+    'kitchen_page' => array(
+      'title' => t('"Kitchen" page (:path)', array(':path' => '/kitchen')),
+      'description' => t('Access to "Kitchen" page'),
+    ),
+    'kitchen_setup_page' => array(
+      'title' => t('"Kitchen Setup" page (:path)', array(':path' => '/kitchen-setup')),
+      'description' => t('Access to "Kitchen Setup" page'),
+    ),
+    'shopping_list_page' => array(
+      'title' => t('"Shopping List" page (:path)', array(':path' => '/shopping-list')),
+      'description' => t('Access to "Shopping List" page'),
+    ),
+    'recipe_status' => array(
+      'title' => t('Recipe Status'),
+      'description' => t('Handle public/private recipe statuses (own recipes).')
+    ),
+    'add_to_category' => array(
+      'title' => t('Add recipe to category'),
+    ),
+    'add_to_calendar' => array(
+      'title' => t('Add recipe to calendar'),
+    ),
+    'clone_recipe' => array(
+      'title' => t('Edit (clone) recipe'),
+    )
+  );
+  $actions = array(
+    'create' => array(
+      'label' => t('Create'),
+      'path' => 'node/add/:ctype',
+    ),
+    'view' => array(
+      'label' => t('View any'),
+      'path' => 'node/%nid',
+    ),
+    'view_own' => array(
+      'label' => t('View own'),
+      'path' => 'node/%nid',
+    ),
+    'edit' => array(
+      'label' => t('Edit any'),
+      'path' => 'node/%nid/edit',
+    ),
+    'edit_own' => array(
+      'label' => t('Edit own'),
+      'path' => 'node/%nid/edit',
+    ),
+    'delete' => array(
+      'label' => t('Delete any'),
+      'path' => 'node/%nid/delete',
+    ),
+    'delete_own' =>  array(
+      'label' => t('Delete own'),
+      'path' => 'node/%nid/delete',
+    ),
+  );
+
+  $custom_ctypes = _node_types_build()->types;
+  unset($custom_ctypes['page']);
+  unset($custom_ctypes['article']);
+  ksort($custom_ctypes);
+
+  foreach($custom_ctypes as $ctype => $config) {
+    foreach($actions as $aid => $action) {
+      $permissions['node_'.$ctype.'_'.$aid.'_page'] = array(
+        'title' => t(
+          ':action :ctype node by path',
+          array(
+            ':action' => $action['label'],
+            ':ctype' => $config->name,
+          )
+        ),
+        'description' => t(
+          'Access :action node for :ctype content type by path - :path',
+          array(
+            ':action' => $action['label'],
+            ':ctype' => $config->name,
+            ':path' => str_replace(':ctype', str_replace('_', '-', $ctype), $action['path']),
+          )
+        )
+      );
+    }
+  }
+
+  return $permissions;
+}
+
+function xoxo_access_menu_alter(&$items) {
+  foreach($items as $key => $value) {
+    switch($key) {
+      case 'kitchen-setup': {
+        $items[$key]['access callback'] = 'user_access';
+        $items[$key]['access arguments'] = array('kitchen_setup_page');
+      } break;
+      case 'kitchen': {
+        $items[$key]['access callback'] = 'user_access';
+        $items[$key]['access arguments'] = array('kitchen_page');
+      } break;
+      case 'shopping-list': {
+        $items[$key]['access callback'] = 'user_access';
+        $items[$key]['access arguments'] = array('shopping_list_page');
+      } break;
+      default: {
+        if((substr($key, 0, 9) == 'node/add/' && count($key) > 9)
+          || $key == 'node/%node'
+          || $key == 'node/%node/edit'
+          || $key == 'node/%node/delete') {
+          $items[$key]['access callback'] = '_xoxo_access_node_access';
+        }
+      }
+    }
+  }
+}

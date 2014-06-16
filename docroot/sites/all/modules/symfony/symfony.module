@@ -1,0 +1,89 @@
+<?php
+
+/**
+ * Implements hook_libraries_info().
+ */
+function symfony_libraries_info() {
+  $libraries['symfony'] = array(
+    'name' => 'Symfony',
+    'vendor url' => 'http://symfony.com',
+    'download url' => 'http://symfony.com/download',
+    'download' => array(
+      'url' => 'http://symfony.com/download?v=Symfony_Standard_Vendors_2.0.7.zip',
+      'type' => 'get',
+    ),
+    'version arguments' => array(
+      'file' => 'deps',
+      'pattern' => '@version=v([0-9\.-].[0-9\.-].[0-9\.-])@',
+      'lines' => 4,
+      'cols' => 50,
+    ),
+    'files' => array(
+      'php' => array(
+        // When loading the library, load the Class Loader.
+        'vendor/symfony/src/Symfony/Component/ClassLoader/UniversalClassLoader.php',
+      ),
+    ),
+    'callbacks' => array(
+      // After loading the Symfony files, register the class loader.
+      'post-load' => array(
+        'symfony_libraries_callback_postload',
+      ),
+    ),
+  );
+  return $libraries;
+}
+
+/**
+ * Libraries callback; Called after loading Symfony.
+ */
+function symfony_libraries_callback_postload($library) {
+  if (isset($library['loaded']) && $library['loaded'] > 0) {
+    // Load the class loader. Use the APC loader if needed.
+    // @TODO: Allow use of other auto-loaders, like the one for APC.
+    $loader = new \Symfony\Component\ClassLoader\UniversalClassLoader();
+    // Allow modules to register their own namespaces.
+    module_invoke_all('symfony_register', $library, $loader);
+    $loader->register();
+  }
+  else {
+    drupal_set_message(t('The Symfony Framework was not found. Please make sure to install it correctly.'), 'error');
+  }
+}
+
+/**
+ * Implements hook_symfony_register().
+ */
+function symfony_symfony_register($library, $loader) {
+  // Register the Symfony namespace.
+  $loader->registerNamespace('Symfony', $library['library path'] . '/vendor/symfony/src');
+}
+
+/**
+ * Implements hook_menu().
+ */
+function symfony_menu() {
+  $items['symfony_test_page'] = array(
+    'title'             => 'Symfony Httpfoundation test page',
+    'access callback'   => TRUE,
+    'page callback'     => 'symfony_menu_callback',
+    'type'              => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+
+/**
+ * Menu callback; Test the Symfony HttpFoundation callback.
+ */
+function symfony_menu_callback() {
+  $symfony = libraries_load('symfony');
+  if ($symfony['loaded'] > 0) {
+    $request = \Symfony\Component\HttpFoundation\Request::createFromGlobals();
+    return '<pre>' . print_r($request, TRUE) . '</pre>';
+  }
+  else {
+    return t('Symfony not found.');
+  }
+}
+

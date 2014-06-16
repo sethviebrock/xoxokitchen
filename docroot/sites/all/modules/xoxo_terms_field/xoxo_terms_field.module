@@ -1,0 +1,51 @@
+<?php
+require_once(
+  DRUPAL_ROOT
+  . '/'
+  . drupal_get_path('module', 'xoxo_terms_field')
+  . '/xoxo_terms_field.inc'
+);
+//New widget for term reference input.
+function xoxo_terms_field_field_widget_info() {
+  return array(
+    'xoxo_terms' => array(
+      'label' => t('XOXO Terms'),
+      'description' => t('Text fields for taxonomy terms input. One per term.'),
+      'field types' => array('taxonomy_term_reference'),
+      'settings' => array(),
+      'behaviors' => array('multiple values' => FIELD_BEHAVIOR_CUSTOM)
+    )
+  );
+}
+//The widget's form.
+function xoxo_terms_field_field_widget_form(
+  &$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element
+) {
+  $elements = array_fill(0, $field['cardinality'], array('tid' => array(
+    '#type' => 'textfield',
+    '#description' => $instance['description'],
+    '#autocomplete_path' => 'xoxo-terms-field/autocomplete/' . $field['field_name'],
+    '#size' => 18
+  )));
+  $tids = array_filter(array_map('_xoxo_terms_field_tid', $items));
+  $terms = taxonomy_term_load_multiple($tids);
+  $names = array();
+  foreach($terms as $term) {
+    $names[] = !empty($term) ? taxonomy_term_title($term) : '';
+  }
+  $widget = array_map('_xoxo_terms_field_tid_val', $elements, $names);
+  $element['#element_validate'][] = '_xoxo_terms_field_value';
+  $element += $widget;
+  return $element;
+}
+//Callback menu item.
+function xoxo_terms_field_menu() {
+  return array('xoxo-terms-field/autocomplete' => array(
+    'title' => 'XOXO Terms',
+    'description' => 'Callback for single term input.',
+    'page callback' => '_xoxo_terms_field_autocomplete',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+    'file' => 'xoxo_terms_field.inc'
+  ));
+}

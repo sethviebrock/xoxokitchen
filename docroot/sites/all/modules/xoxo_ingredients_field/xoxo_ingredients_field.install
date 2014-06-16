@@ -1,0 +1,24 @@
+<?php
+function xoxo_ingredients_field_field_schema($field) {
+  $nid = array(
+    'description' => 'Component (ingredient) node ID.',
+    'type' => 'int'
+  );
+  $amount = array(
+    'description' => 'Amount of ingredient.',
+    'type' => 'varchar',
+    'length' => 12
+  );
+  $unit = array(
+    'description' => 'Unit of measurement (user defined).',
+    'type' => 'varchar',
+    'length' => 255
+  );
+  return array(
+    'columns' => array(
+      'nid' => $nid,
+      'amount' => $amount,
+      'unit' => $unit
+    )
+  );
+}

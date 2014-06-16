@@ -1,0 +1,12 @@
+name = XOXO fields
+description = XOXO custom fields: shopping list item.
+dependencies[] = field
+dependencies[] = node_reference
+dependencies[] = views_drag_drop
+
+files[] = xoxo_fields.event_description.inc
+files[] = include/xoxo_fields.views.inc
+
+package = Warecorp
+core = 7.x
+version = "7.x-1.x-dev"

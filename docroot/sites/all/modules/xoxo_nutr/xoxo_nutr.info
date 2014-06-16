@@ -1,0 +1,6 @@
+name = XOXO nutritional
+description = XOXO nutritional calculation and setup.
+dependencies[] = xoxo_fields
+package = Warecorp
+core = 7.x
+version = "7.x-1.x-dev"

@@ -1,0 +1,451 @@
+<?php
+function xoxo_ingredients_field_field_is_empty($item, $field) {
+  return empty($item['add_name']) && empty($item['nid']);
+}
+function xoxo_ingredients_field_field_info() {
+  return array(
+    'ingredients' => array(
+      'label' => t('Ingredients'),
+      'description' => t('Recipe ingredients.'),
+      'instance_settings' => array(),
+      'settings' => array('referenceable_types' => array('component')),
+      'default_widget' => 'ingredients',
+      'default_formatter' => 'ingredients',
+      'no_ui' => FALSE
+    )
+  );
+}
+function xoxo_ingredients_field_field_widget_info() {
+  $behaviors = array(
+    'multiple values' => FIELD_BEHAVIOR_DEFAULT,
+    'default value' => FIELD_BEHAVIOR_DEFAULT
+  );
+  $settings = array(
+    'autocomplete_match' => 'contains',
+    'size' => 60,
+    'autocomplete_path' => 'node_reference/autocomplete',
+  );
+  return array(
+    'ingredients' => array(
+      'label' => t('Ingredients'),
+      'description' => t('Allows adding ingredient to a recipe.'),
+      'field types' => array('ingredients'),
+      'settings' => $settings,
+      'behaviors' => $behaviors
+    )
+  );
+}
+function xoxo_ingredients_field_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  $nid = $element + array(
+    '#type' => 'textfield',
+    '#weight' => 1,
+    '#default_value' => isset($items[$delta]['nid']) ? $items[$delta]['nid'] : NULL,
+    '#autocomplete_path' => 
+      'node_reference_xoxo/autocomplete/node/'
+      . $instance['bundle']
+      . '/'
+      . $field['field_name'],
+     '#value_callback' => '_xoxo_node_reference_autocomplete_value',
+     '#element_validate' => array('node_reference_autocomplete_validate'),
+     '#maxlength' => 255
+  );
+  $nid['#title'] = t('Node ID');
+  $amount = $element + array(
+    '#type' => 'textfield',
+    '#weight' => 2,
+    '#default_value' => isset($items[$delta]['amount']) ? $items[$delta]['amount'] : NULL,
+    '#size' => 5,
+    '#maxlength' => 10
+  );
+  $amount['#title'] = t('Amount');
+  $unit = $element + array(
+    '#type' => 'select',
+    '#weight' => 3,
+    '#default_value' => isset($items[$delta]['unit']) ? $items[$delta]['unit'] : NULL,
+  );
+  $unit['#title'] = t('Unit');
+  $vocabularies = taxonomy_vocabulary_get_names();
+  $vid = $vocabularies['uom']->vid;
+  $terms = taxonomy_get_tree($vid);
+  foreach ($terms as $term) {
+    $unit['#options'][$term->tid] = !empty($term) ? taxonomy_term_title($term) : '';
+  }
+  $element['unit'] = $unit;
+  $element['amount'] = $amount;
+  $element['nid'] = $nid;
+  return $element;
+}
+
+function xoxo_ingredients_field_field_presave($entity_type, $entity, $field, $instance, $langcode, &$items) {
+  foreach($items as $delta => $value) {
+    if (!empty($value) && !empty($items[$delta]['nid']) && !empty($items[$delta]['amount']) && !empty($items[$delta]['unit'])) {
+      $items[$delta]['amount'] = trim($value['amount']);
+      if(!is_numeric($value['amount'])) {
+        $parts = explode('/', $value['amount']);
+        if(count($parts) == 2 && is_numeric($parts[0]) && is_numeric($parts[1]) && $parts[1] > 0) {
+          $items[$delta]['amount'] = round($parts[0]/$parts[1], 4);
+        }
+      }
+    }
+    else {
+      unset($items[$delta]);
+    }
+  }
+}
+
+
+function xoxo_ingredients_field_field_validate($entity_type, $entity, $field, $instance, $langcode, $items, &$errors) {
+/*  $name = $field['field_name'];
+  $filtered = array();
+  global $user;
+  foreach($items as $delta => $item) {
+    if (!xoxo_ingredients_field_field_is_empty($item, $field)) {
+      $item['amount'] = trim($item['amount']);
+      $items[$delta]['amount'] = trim($items[$delta]['amount']);
+      $filtered[$delta] = $item;
+    }
+  }
+
+  foreach ($filtered as $delta => $item) {
+    if (!is_numeric($item['amount']) || $item['amount'] <= 0) {
+      $parts = explode('/', $item['amount']);
+      if(is_numeric($item['amount']) && $item['amount'] <= 0) {
+        $message = t('Invalid amount value. Value must be positive only.');
+        $error = array(
+          'error' => 'xoxo_ingredients_field_invalid', 
+          'message' => $message,
+          'part_id' => 'amount',
+        );
+        $errors[$name][$langcode][$delta][] = $error;
+      }
+      elseif(!(count($parts) == 2 && is_numeric($parts[0]) && is_numeric($parts[1]) && $parts[1] > 0 && $parts[0] > 0)) {
+        $message = t('Invalid amount value.');
+        $error_id = 'xoxo_ingredients_field_invalid';
+        $error = array(
+          'error' => $error_id, 
+          'message' => $message,
+          'part_id' => 'amount',
+        );
+        $errors[$name][$langcode][$delta][] = $error;
+      }
+    }
+    if (empty($item['add'])) {
+      $query = db_select('node', 'n');
+      $query->addField('n', 'nid');
+      // add condition to find titles inside main food category
+      $query->join('field_data_field_component_category', 'fc1', 'n.nid = fc1.entity_id');
+      $query->condition('fc1.field_component_category_tid', CATEGORY_TID_FOOD_BEV_TOBACCO); 
+      // add condition to remove all items that are belongs to "Tobacco/Smoking Accessories" second level category
+      $query->join('field_data_field_component_category_2', 'fc2', 'n.nid = fc2.entity_id');
+      $query->condition('fc2.field_component_category_2_tid', CATEGORY_TID_TOBSMOACCESSORIES, '<>');
+      $query->condition('n.nid', $item['nid'], '='); 
+      $result = $query->execute()->fetchAll();
+      if(empty($result)) {
+        $query = db_select('node', 'n');
+        $query->addField('n', 'nid');
+        $query->condition('n.nid', $item['nid'], '=');
+        $query->condition('n.type', 'component', '=');  
+        $query->condition('n.uid', $user->uid, '='); 
+        $result = $query->execute()->fetchAll();
+        if(empty($result)) {
+          $query = db_select('node', 'n');
+          $query->addField('n', 'title');
+          $query->condition('n.nid', $item['nid'], '=');
+          $title = $query->execute()->fetchField();
+          $message = t('Invalid ingredient.');//, array('%name' => $title)
+          $error_id = 'xoxo_ingredients_field_invalid';
+          $error = array('error' => $error_id, 'message' => $message, 'part_id' => 'nid');
+          $errors[$name][$langcode][$delta][] = $error;
+        }
+      }
+   } 
+  }
+*/
+}
+function xoxo_ingredients_field_field_instance_settings_form($field, $instance) {
+  $form = array();
+  $form['referenceable_types'] = array(
+    '#type' => 'select',
+    '#multiple' => TRUE,
+    '#options' => node_type_get_names(),
+    '#default_value' => $instance['settings']['referenceable_types'],
+    '#title' => t('Component node type(s).')
+  );
+  return $form;
+}
+function xoxo_ingredients_field_field_widget_error($element, $error, $form, &$form_state) {
+  if($element['#field_name'] == 'field_recipe_ingredients') {
+    if(isset($error['part_id'])) {
+      form_error($element[$error['part_id']], $error['message']);
+    }
+    else {
+      form_error($element, $error['message']);
+    }
+  }
+}
+function xoxo_ingredients_field_field_formatter_info() {
+  return array(
+    'ingredients' => array(
+      'label' => t('Ingredients'),
+      'description' => t('Allows viewing ingredients in a recipe.'),
+      'field types' => array('ingredients'),
+      'settings' => array()
+    )
+  );
+}
+function xoxo_ingredients_field_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  foreach (array_keys($items) as $delta) {
+    foreach(array_keys($items[$delta]) as $key) {
+      $val = $items[$delta][$key];
+      $items[$delta][$key] = array('#type' => 'container');
+      $items[$delta][$key]['#attributes']['class'] = array($key);
+      $items[$delta][$key]['value']['#markup'] = $val;
+    }
+    $items[$delta]['#type'] = 'container';
+    $items[$delta]['#attributes'] = array(
+      'class' => array('ingredient-' . $delta)
+    );
+  }
+  return $items;
+}
+function xoxo_ingredients_field_field_formatter_prepare_view($entity_type, $entities, $field, $instances, $langcode, &$items, $displays) {
+  foreach ($entities as $id => $entity) {
+    foreach (array_keys($items[$id]) as $delta) {
+      $node = node_load($items[$id][$delta]['nid']);
+      $term = taxonomy_term_load($items[$id][$delta]['unit']);
+      unset($items[$id][$delta]['nid']);
+      unset($items[$id][$delta]['unit']);
+      $items[$id][$delta]['title'] = $node->title;
+      $items[$id][$delta]['amount_'] = _xoxo_search_frac_string($items[$id][$delta]['amount']);
+      unset($items[$id][$delta]['amount']);
+      $items[$id][$delta]['unit'] = !empty($term) ? taxonomy_term_title($term) : '';
+    }
+  }
+}
+
+/*
+ * by Sergei Churilo at 05-08-2012
+ */
+
+define('CATEGORY_TID_FOOD_BEV_TOBACCO', 2423);
+define('CATEGORY_TID_TOBSMOACCESSORIES', 2792);
+
+
+function xoxo_ingredients_field_form_alter(&$form, &$form_state, $form_id) {
+  if($form_id == 'recipe_node_form') {
+    if(!empty($form['field_recipe_side_dish'][LANGUAGE_NONE])) {
+      foreach($form['field_recipe_side_dish'][LANGUAGE_NONE] as $key => $v) {
+        if(is_numeric($key) && isset($form['field_recipe_side_dish'][LANGUAGE_NONE][$key]['nid'])) {
+          $form['field_recipe_side_dish'][LANGUAGE_NONE][$key]['nid']['#autocomplete_path'] = 'node_reference_xoxo/autocomplete/node/recipe/field_recipe_side_dish';
+          $form['field_recipe_side_dish'][LANGUAGE_NONE][$key]['nid']['#value_callback'] = '_xoxo_node_reference_autocomplete_value';
+        }
+      }
+    }
+  }
+}
+
+function xoxo_ingredients_field_menu() {
+  $items['node_reference_xoxo/autocomplete/%/%/%'] = array(
+    'page callback' => '_xoxo_node_reference_autocomplete',
+    'page arguments' => array(2, 3, 4),
+    'access callback' => 'reference_autocomplete_access',
+    'access arguments' => array(2, 3, 4),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+// custom version of node_reference_autocomplete_value
+function _xoxo_node_reference_autocomplete_value($element, $input = FALSE, $form_state) {
+  if ($input === FALSE) {
+    // We're building the displayed 'default value': expand the raw nid into
+    $nid = $element['#default_value'];
+    if (!empty($nid)) {
+      $q = db_select('node', 'n');
+      $node_title_alias = $q->addField('n', 'title');
+      $q->addTag('node_access')
+        ->condition('n.nid', $nid)
+        ->range(0, 1);
+      $result = $q->execute();
+      // @todo If no result (node doesn't exist or no access).
+      $value = $result->fetchField();
+      return $value;
+    }
+  }
+}
+
+
+// custom version of node_reference_autocomplete
+function _xoxo_node_reference_autocomplete($entity_type, $bundle, $field_name, $string = '') {
+  $field = field_info_field($field_name);
+  $instance = field_info_instance($entity_type, $field_name, $bundle);
+
+  switch($field_name) {
+    case 'field_recipe_side_dish' : {
+      $options = array(
+        'string' => $string,
+        'match' => $instance['widget']['settings']['autocomplete_match'],
+        'limit' => 100,
+      );
+    } break;
+    default : {
+      $options = array(
+        'string' => $string,
+        'match' => 'any_word',//$instance['widget']['settings']['autocomplete_match'],
+        'limit' => 50,
+      );
+    }
+  }
+  
+  $references = _xoxo_node_reference_potential_references($field, $options);
+
+  $matches = array();
+  foreach ($references as $id => $row) {
+    // Markup is fine in autocompletion results (might happen when rendered
+    // through Views) but we want to remove hyperlinks.
+    $suggestion = preg_replace('/<a href="([^<]*)">([^<]*)<\/a>/', '$2', $row['rendered']);
+    // Add a class wrapper for a few required CSS overrides.
+    $matches[$row['title']] = '<div class="reference-autocomplete">' . $suggestion . '</div>';
+  }
+
+  drupal_json_output($matches);
+}
+
+function _xoxo_node_reference_potential_references($field, $options = array()) {
+  // Fill in default options.
+  $options += array(
+    'string' => '',
+    'match' => 'contains',
+    'ids' => array(),
+    'limit' => 0,
+  );
+
+  $results = &drupal_static(__FUNCTION__, array());
+
+  // Create unique id for static cache.
+  $cid = $field['field_name'] . ':' . $options['match'] . ':'
+    . ($options['string'] !== '' ? $options['string'] : implode('-', $options['ids']))
+    . ':' . $options['limit'];
+  if (!isset($results[$cid])) {
+    $references = FALSE;
+    if (module_exists('views') && !empty($field['settings']['view']['view_name'])) {
+      $references = _node_reference_potential_references_views($field, $options);
+    }
+
+    if ($references === FALSE) {
+      $references = _xoxo__node_reference_potential_references_standard($field, $options);
+    }
+
+    // Store the results.
+    $results[$cid] = !empty($references) ? $references : array();
+  }
+
+  return $results[$cid];
+}
+
+
+function _xoxo__node_reference_potential_references_standard($field, $options) {
+  // Avoid useless work
+  if (!count($field['settings']['referenceable_types'])) {
+    return array();
+  }
+  
+  global $user;
+
+  $query = db_select('node', 'n');
+  $node_nid_alias   = $query->addField('n', 'nid');
+  $node_title_alias = $query->addField('n', 'title', 'node_title');
+  $node_type_alias  = $query->addField('n', 'type',  'node_type');
+  
+ // $node_type_alias  = $query->addField('xn', 'value',  'name');
+  
+  $query->addTag('node_access')
+    ->addMetaData('id', ' _node_reference_potential_references_standard')
+    ->addMetaData('field', $field)
+    ->addMetaData('options', $options);
+
+  // field specific query conditions
+  switch($field['field_name']) {
+    case 'field_recipe_side_dish' : {
+      $query->join('field_data_field_recipe_status', 'f', 'n.nid = f.entity_id');
+      $query->condition(db_or()->condition('n.uid', $user->uid)->condition('f.field_recipe_status_value', 1));
+    } break;
+    default : {
+      // add condition to find titles inside main food category
+      $query->join('field_data_field_component_category', 'fc1', 'n.nid = fc1.entity_id');
+      $query->condition('fc1.field_component_category_tid', CATEGORY_TID_FOOD_BEV_TOBACCO); 
+      // add condition to remove all items that are belongs to "Tobacco/Smoking Accessories" second level category
+      $query->join('field_data_field_component_category_2', 'fc2', 'n.nid = fc2.entity_id');
+      $query->condition('fc2.field_component_category_2_tid', CATEGORY_TID_TOBSMOACCESSORIES, '<>');
+      
+      // author is admin or logged in user
+      // TODO: need to modify for friendship/sharing on phase 2
+      // show if published or author
+      $query->condition(db_or()->condition('n.status', 1)->condition('n.uid', $user->uid));
+    }
+  }
+
+  if (is_array($field['settings']['referenceable_types'])) {
+    $query->condition('n.type', $field['settings']['referenceable_types'], 'IN');
+  }
+
+  if ($options['string'] !== '') {
+    switch ($options['match']) {
+      case 'contains':
+        $query->condition('n.title', '%' . $options['string'] . '%', 'LIKE');
+        break;
+
+      case 'starts_with':
+        $query->condition('n.title', $options['string'] . '%', 'LIKE');
+        break;
+      case 'any_word':
+        $str = trim($options['string']);
+        $str_parts = explode(' ', $str);
+        if(!empty($str_parts)) {
+          foreach($str_parts as $str_item) {
+            $query->condition('n.title', '%' . $str_item . '%', 'LIKE');
+          }
+        }
+        else {
+          $query->condition('n.title', '%' . $options['string'] . '%', 'LIKE');
+        }
+        break;
+        
+      case 'equals':
+      default: // no match type or incorrect match type: use "="
+        $query->condition('n.title', $options['string']);
+        break;
+    }
+  }
+
+  if ($options['ids']) {
+    $query->condition('n.nid', $options['ids'], 'IN');
+  }
+
+  if ($options['limit']) {
+    $query->range(0, $options['limit']);
+  }
+
+ /* $query
+    ->orderBy($node_title_alias)
+    ->orderBy($node_type_alias);
+    */
+  $query
+    ->orderBy('LENGTH(n.title)');
+    
+    
+  $result = $query->execute()->fetchAll();
+  $references = array();
+  $used_items = array();
+  foreach ($result as $node) {
+  /*  if(in_array($node->name, $used_items)) {
+      continue;
+    }
+    $used_items[] = $node->name;*/
+    $references[$node->nid] = array(
+      'title'    => $node->node_title,
+      'rendered' => $node->node_title,//check_plain($node->name.' ('.$node->node_title.')'), //check_plain($node->node_title.'('.$node->name.')'),
+    );
+  }
+  return $references;
+}

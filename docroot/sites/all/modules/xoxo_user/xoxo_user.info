@@ -1,0 +1,4 @@
+name = XOXO User
+description = XOXO Kitchen users related customizations.
+core = 7.x
+package = Warecorp

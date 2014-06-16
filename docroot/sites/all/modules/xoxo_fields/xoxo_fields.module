@@ -1,0 +1,2975 @@
+<?php
+// info: xoxo_fields.module, v1.0 2012/2/20 Segei Churilo
+
+$p = drupal_get_path('module', 'xoxo_fields') . '/';
+require_once $p . 'constants.inc';
+require_once $p . 'xoxo_fields.add_to_category.inc';
+require_once DRUPAL_ROOT . '/modules/node/node.pages.inc';
+
+function _xoxo_fields_view_custom_sort() {
+  // todo: add custom (php) filer to components view
+}
+
+function xoxo_fields_init() {
+   _xoxo_fields_custom_term_sort_setup();
+  drupal_add_js(drupal_get_path('theme', 'xoxo').'/js/jscrollpane.js', 'file');
+  drupal_add_js(drupal_get_path('module', 'xoxo_fields') .'/js/xoxo_fields.js', 'file');
+
+  drupal_add_library('system', 'ui.dialog');
+  drupal_add_js(
+      array(
+        'xoxo_fields' => array(
+          'messages' => array(
+            'error_title' => t('Error'),
+            'error_message' => t('Server error has been occurred.'),
+          ),
+        )
+      ),
+      'setting'
+    );
+
+  if(   arg(0) == 'shopping-list'
+    ||  arg(0) == 'kitchen'
+    ||  arg(0) == 'kitchen-setup'
+    ||  (arg(0) == 'views' && arg(1) == 'ajax')
+  ) {
+    drupal_add_js(
+      array(
+        'xoxo_fields' => array(
+          'page' => arg(0),
+          'dialog_status' => TRUE,
+        )
+      ),
+      'setting'
+    );
+  }
+  else {
+    drupal_add_js(
+      array(
+        'xoxo_fields' => array(
+          'page' => arg(0),
+          'dialog_status' => FALSE,
+        )
+      ),
+      'setting'
+    );
+  }
+
+  drupal_add_js(
+    array(
+      'xoxo_fields' => array(
+        'calendar_status' => FALSE,
+      )
+    ),
+    'setting'
+  );
+
+  if(arg(0) == 'node' && is_numeric(arg(1))) {
+    $node = node_load(arg(1));
+    if($node->type == 'recipe') {
+      drupal_add_library('system', 'ui.datepicker');
+
+      if (date('w') == 0) {
+        $beginning_of_week = strtotime('today', time());
+      }
+      else {
+        $beginning_of_week = strtotime('last Sunday', time());
+      }
+
+      drupal_add_js(
+        array(
+          'xoxo_fields' => array(
+            'arg1' => arg(1),
+            'current_date' => array(
+              'full' => date('m/d/Y'),
+              'day' => date('j', $beginning_of_week),
+              'month' => date('n', $beginning_of_week),
+              'year' => date('Y', $beginning_of_week),
+            ),
+            'exceptions' => _xoxo_fields_recipe_filled_days(arg(1), $beginning_of_week),
+            'calendar_status' => TRUE,
+          )
+        ),
+        'setting'
+      );
+    }
+  }
+
+
+}
+/*
+ * debug usage
+ *_xoxo_debug($var, 'var_name', 'xoxo_fields');
+ *
+ */
+
+/*
+ * Implementation of hook_menu
+ */
+function xoxo_fields_menu() {
+  $items = array();
+
+  $items['ajax/add-to-calendar'] = array(
+    'page callback' => '_xoxo_fields_ajax_add_to_calendar',
+    'access arguments' => array('access content'),
+    'delivery callback' => 'drupal_json_output',
+    'type' => MENU_CALLBACK,
+  );
+
+  if(module_exists('search_api')) {
+    foreach (search_api_index_load_multiple(FALSE) as $index) {
+      $items['admin/config/search/search_api/'.$index->machine_name] = array(
+        'title' => t('(*experimental) indexing: @preset', array('@preset' => $index->machine_name)),
+        'page callback' => '_xoxo_fields_batch',
+        'access arguments' => array('administer search_api'),
+      );
+    }
+  }
+
+  $items['xoxo/brand/autocomplete'] = array(
+    'title' => 'Brand autocomplete',
+    'page callback' => '_xoxo_fields_brand_autocomplete',
+    'access callback' => 'user_access',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['xoxo/manufacturer/autocomplete'] = array(
+    'title' => 'Manufacturer autocomplete',
+    'page callback' => '_xoxo_fields_manufacturer_autocomplete',
+    'access callback' => 'user_access',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+function _xoxo_fields_brand_autocomplete($string = '') {
+  $matches = array();
+  if ($string) {
+    $result = db_select('xoxo_brands')->fields('xoxo_brands', array('value'))->condition('value', db_like($string) . '%', 'LIKE')->range(0, 10)->execute();
+    foreach ($result as $brand) {
+      $matches[$brand->value] = check_plain($brand->value);
+    }
+  }
+
+  drupal_json_output($matches);
+}
+
+function _xoxo_fields_manufacturer_autocomplete($string = '') {
+  $matches = array();
+  if ($string) {
+    $result = db_select('xoxo_manufacturers')->fields('xoxo_manufacturers', array('value'))->condition('value', db_like($string) . '%', 'LIKE')->range(0, 10)->execute();
+    foreach ($result as $manufacturer) {
+      $matches[$manufacturer->value] = check_plain($manufacturer->value);
+    }
+  }
+
+  drupal_json_output($matches);
+}
+
+function _xoxo_fields_batch() {
+  $iid = arg(4);
+  $function = '_xoxo_fields_search_index';
+  $batch = $function($iid);
+  batch_set($batch);
+  batch_process();
+}
+
+
+function _xoxo_fields_search_index($iid) {
+  $operations = array(
+    array(
+      '_xoxo_fields_search_index_process',
+      array($iid),
+    )
+  );
+  $batch = array(
+    'operations' => $operations,
+    'finished' => '_xoxo_fields_search_index_finished',
+    'title' => t('Search indexing'),
+    'init_message' => t('Indexing is starting.'),
+    'progress_message' => '',
+    'error_message' => t('Indexing has encountered an error.'),
+  );
+  return $batch;
+}
+
+function _xoxo_fields_search_index_process($iid, &$context) {
+  $index = search_api_index_load($iid);
+  $limit = 3;
+  $batch_size = 50;
+
+  if(empty($context['sandbox'])) {
+    $context['sandbox'] = array();
+    $context['sandbox']['progress'] = 0;
+    $status = search_api_index_status($index);
+    $remaining = $status['total'] - $status['indexed'];
+    $context['sandbox']['max'] = (int) $remaining;
+  }
+
+  if(!$context['sandbox']['max']) {
+    $context['finished'] = 1;
+
+    return;
+  }
+
+  try {
+    $ret = search_api_index_items($index, $limit * $batch_size);
+  }
+  catch (SearchApiException $e) {
+    $ret = FALSE;
+    watchdog('search_api', t('An error occurred while trying to index items on index !name: !message',
+        array('!name' => $index->machine_name, '!message' => $e->getMessage())), NULL, WATCHDOG_ERROR);
+    drupal_goto('admin/content');
+  }
+  if ($ret) {
+    $context['sandbox']['progress'] = $context['sandbox']['progress'] + $ret;
+  }
+  else {
+     $context['finished'] = 1;
+  }
+
+
+  if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+    $context['finished'] = $context['sandbox']['progress'] / $context['sandbox']['max'];
+  }
+  if($context['sandbox']['progress'] >= $context['sandbox']['max']) {
+    $context['finished'] = 1;
+    $context['results'] = array(
+      '@processed' => $context['sandbox']['progress'],
+    );
+  }
+}
+
+function xoxo_fields_search_index_finished($success, $results, $operations) {
+  if($success) {
+    $message = t('Indexing successfully finished. @processed items indexed.', array($results));
+  }
+  else {
+    $message = t('Indexing finished with an error.');
+  }
+}
+
+/*
+ * ajax callback: add recipe to calendar
+ */
+function _xoxo_fields_ajax_add_to_calendar() {
+  $status = FALSE;
+  $event_nid = FALSE;
+  $responce_array = array();
+  $nid = $_POST['nid'];
+  $date = $_POST['date'];
+  $node = node_load($nid);
+  if ($node) {
+    $cat = _xoxo_fields_prepare_cat_tid($node);
+    $tid = $cat['tid'];
+    $cat_label = $cat['label'];
+
+    $event_nid = _xoxo_fields_find_event_by_date((int)strtotime($date), $tid);
+
+    $args = array(
+      'preset' => XOXO_FIELDS_PRESET_CALENDAR,
+      'drag_args' => array(
+        'field_event_recipes' => $node->nid,
+        '@recipe_title' => $node->title,
+        '@type' => 'recipe',
+        '@new' => 1,
+      ),
+      'drop_args' => array(
+        'field_event_date' => strtotime($_POST['date']),
+        'field_event_category' => $tid,
+        '@date' => $_POST['date'],
+        '@category' => $cat_label,
+      ),
+    );
+
+    if($event_nid) {
+      $args['drop_args']['nid'] = $event_nid;
+    }
+    $result = _views_drag_drop_ajax_callback(FALSE, $args);
+    $status = $result['status'];
+    $response_array = array(
+      'args' => $args,
+    );
+  }
+
+  $response_array['status'] = $status;
+
+  return $response_array;
+//  return drupal_json_output($response_array);
+//  exit;
+}
+
+function _xoxo_fields_prepare_cat_tid($node) {
+  $cat_label = '';
+  $nid = $node->nid;
+  $tid_conv = unserialize(XOXO_FIELDS_MEAL_TO_EVENT_DEPENDANCIES);
+  global $user;
+  $tid = _xoxo_fields_tid($nid, 1);
+  if (array_key_exists($tid, $tid_conv)) {
+    $tid = $tid_conv[$tid];
+  }
+  else {
+    $tid = $tid_conv['default'];
+  }
+//  $tid = (isset($tid_conv[$node->field_recipe_meal_type[LANGUAGE_NONE][0]['tid']])) ? $tid_conv[$node->field_recipe_meal_type[LANGUAGE_NONE][0]['tid']] : $tid_conv['default'];
+  switch($tid) {
+    case XOXO_FIELDS_EVENT_TYPE_BREAKFAST: {
+      $cat_label = XOXO_FIELDS_EVENT_TYPE_BREAKFAST_LABEL;
+    } break;
+    case XOXO_FIELDS_EVENT_TYPE_LUNCH: {
+      $cat_label = XOXO_FIELDS_EVENT_TYPE_LUNCH_LABEL;
+    } break;
+    case XOXO_FIELDS_EVENT_TYPE_DINNER: {
+      $cat_label = XOXO_FIELDS_EVENT_TYPE_DINNER_LABEL;
+    } break;
+    case XOXO_FIELDS_EVENT_TYPE_ADDITIONAL: {
+      $cat_label = XOXO_FIELDS_EVENT_TYPE_ADDITIONAL_LABEL;
+    } break;
+  }
+
+  return array(
+    'label' => $cat_label,
+    'tid' => $tid,
+  );
+}
+/*
+ * Find nid of event that match conditions date/category/author
+ */
+function _xoxo_fields_find_event_by_date($timestamp, $tid) {
+  global $user;
+  $q = "
+    SELECT
+      n.nid AS nid
+    FROM
+      node n
+    LEFT JOIN
+      field_data_field_event_date f1 ON n.nid = f1.entity_id
+    LEFT JOIN
+      field_data_field_event_category f2 ON n.nid = f2.entity_id
+    WHERE
+      n.uid = :uid
+        AND
+      f2.field_event_category_tid = :tid
+        AND
+      f1.field_event_date_value < :time_up
+        AND
+      f1.field_event_date_value > :time_down";
+  $result = db_query(
+    $q,
+    array(
+      ':uid' => $user->uid,
+      ':tid' => $tid,
+      ':time_up' => $timestamp + 43000,
+      ':time_down' => $timestamp - 43000,
+    )
+  )->fetchField();
+
+  return $result;
+}
+
+function _xoxo_fields_recipe_filled_days($recipe_nid, $init_date = NULL, $uid = NULL) {
+  if(is_null($uid)) {
+    global $user;
+    $uid = $user->uid;
+  }
+
+  $recipe = node_load($recipe_nid);
+
+  $tid = _xoxo_fields_prepare_cat_tid($recipe);
+  $tid = $tid['tid'];
+
+  $days = array();
+  $q = "
+    SELECT DISTINCT
+      f.field_event_date_value AS date
+    FROM
+      node n
+    LEFT JOIN
+      field_data_field_event_recipes r ON r.entity_id = n.nid
+    LEFT JOIN
+      field_data_field_event_category c ON c.entity_id = n.nid
+    LEFT JOIN
+      field_data_field_event_date f ON f.entity_id = n.nid
+    WHERE
+        n.uid = :uid
+      AND
+        c.field_event_category_tid = :tid
+      AND
+        (r.field_event_recipes_nid = :recipe_nid OR r.delta = 4)
+      AND
+        f.field_event_date_value >= :init_date
+    ORDER BY
+      f.field_event_date_value
+    ASC";
+
+  $result = db_query(
+    $q,
+    array(
+      ':uid' => $uid,
+      ':recipe_nid' => $recipe_nid,
+      ':init_date' => $init_date,
+      ':tid' => $tid,
+    )
+  )->fetchAll();
+
+  foreach($result as $obj) {
+    $days[] = date('n/j/Y', $obj->date);
+  }
+
+  return $days;
+}
+/**
+ * Implements hook_field_info().
+ *
+ * Provides the description of the field.
+ */
+function xoxo_fields_field_info() {
+  return array(
+    // We name our field as the associative name of the array.
+    'field_xoxo_shopping_list_item' => array(
+      'label' => t('Shopping list item'),
+      'description' => t('XOXO custom field.'),
+      'default_widget' => 'field_xoxo_shopping_list_item_widget',
+      'default_formatter' => 'field_xoxo_shopping_list_item_formatter',
+      'settings' => array(
+        'referenceable_types' => array(),
+        'uom_voc' => '',
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_validate().
+ */
+function xoxo_fields_field_validate($entity_type, $entity, $field, $instance, $langcode, $items, &$errors) {
+  //foreach ($items as $delta => $item) {
+  //}
+}
+
+/**
+ * Implements hook_field_is_empty().
+ */
+function xoxo_fields_field_is_empty($item, $field) {
+  return empty($item['reference_nid']);// || empty($item['qty']) || empty($item['uom']);
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function xoxo_fields_field_formatter_info() {
+  return array(
+    'field_xoxo_shopping_list_item_formatter' => array(
+      'label' => t('Shopping list item'),
+      'field types' => array('field_xoxo_shopping_list_item'),
+    ),
+    'field_xoxo_shopping_list_item_mail_formatter' => array(
+      'label' => t('Shopping list item (mail)'),
+      'field types' => array('field_xoxo_shopping_list_item')
+    ),
+    'field_xoxo_brand' => array(
+      'label' => t('Brand'),
+      'field types' => array('number_integer'),
+    ),
+    'field_xoxo_manufacturer' => array(
+      'label' => t('Manufacturer'),
+      'field types' => array('number_integer'),
+    ),
+    'field_xoxo_name' => array(
+      'label' => t('Component name'),
+      'field types' => array('number_integer'),
+    ),
+  );
+}
+
+/**
+ * Implement hook_theme().
+ */
+function xoxo_fields_theme($existing, $type, $theme, $path) {
+  return array(
+    'xoxo_fields_shopping_list' => array(
+      'variables' => array('component_title' => '', 'brand' => '', 'description' => '', 'qty' => '', 'uom' => '', 'user_name' => '', 'last_added' => '', 'status' => 0, 'event_id' => 0, 'recipe_id' => 0),
+      'template' => 'xoxo-shopping-list',
+      'path' => drupal_get_path('theme', 'xoxo').'/templates',
+    ),
+    'xoxo_fields_shopping_list_mail' => array(
+      'variables' => array('component_title' => '', 'brand' => '', 'description' => '', 'qty' => '', 'uom' => '', 'user_name' => '', 'last_added' => '', 'status' => 0, 'event_id' => 0, 'recipe_id' => 0),
+      'template' => 'xoxo-shopping-list-mail',
+      'path' => drupal_get_path('theme', 'xoxo').'/templates',
+    ),
+    'xoxo_fields_calendar_day' => array(
+      'variables' => array('date' => '', 'content' => '', 'description' => ''),
+    ),
+  );
+}
+
+function theme_xoxo_fields_calendar_day($variables) {
+  if(!isset($variables['date'])) {
+    return $variables['content'];
+  }
+
+  $content = theme(
+    'views_drag_drop_operations',
+    array(
+      'preset' => XOXO_FIELDS_PRESET_CALENDAR,//'day_description',
+      'delta' => 1,
+      'content' => $variables['content'],
+      'args' => array(
+        'date' => $variables['date'],
+        'description' => $variables['description'],
+      ),
+      'event' => 'click',
+    )
+  );
+
+  return $content;
+}
+
+/*
+function _xoxo_fields_day_descr_example($date) {
+  $text = _xoxo_fields_get_day_description($date);
+  return theme(
+    'xoxo_fields_calendar_day',
+    array(
+      'content' => 'here is the day with timestamp '.$date.' '.date('j/m/Y', $date).'<br/>'.$text,
+      'date' => $date,
+      'description' => ($text) ? $text : '', //- empty -',
+    )
+  );
+}
+*/
+
+function  _xoxo_fields_theme_calendar_day_column($date, $content) {
+  $text = _xoxo_fields_get_day_description($date, 0);
+  return theme(
+    'xoxo_fields_calendar_day',
+    array(
+      'content' => $content,
+      'date' => $date,
+      'description' => ($text) ? $text : '', //t('- empty -'),
+    )
+  );
+}
+
+function xoxo_fields_views_drag_drop_assign_actions(&$config, $args) {
+  $config['mark_on_hand'] = array(
+    'title' => 'Mark on hand',
+    'content' => 'Mark on hand',
+    'preset' => XOXO_FIELDS_PRESET_CALENDAR,
+    'status' => array(
+      'callback' => '_xoxo_fields_mark_on_hand_status',
+    ),
+    'weight' => 1,
+    'new_action' => 'unmark_on_hand',
+
+  );
+  $config['unmark_on_hand'] = array(
+    'title' => 'Unmark on hand',
+    'content' => 'Unmark on hand',
+    'preset' => XOXO_FIELDS_PRESET_CALENDAR,
+    'status' => array(
+      'callback' => '_xoxo_fields_mark_on_hand_status',
+    ),
+    'weight' => 1,
+    'new_action' => 'mark_on_hand',
+    'options' => array(
+      'classes' => array(
+        'parent' => 'item-mark-on-hand',
+      )
+    )
+  );
+  $config['delete_shopping_list_item'] = array(
+    'title' => 'Delete shopping list item',
+    'content' => 'Delete item',
+    'preset' => XOXO_FIELDS_PRESET_SHOPPING_LIST,
+    'status' => array(
+      'callback' => '_xoxo_fields_delete_shopping_list_item_status',
+    ),
+    'remove_container' => TRUE,
+  );
+
+  // day descriptions
+  $descr_content = '<div class="event-message-header">Events:</div>';
+  if(isset($args['date'], $args['description'])) {
+    $descr_content .= theme(
+      'inplaceedit_textarea',
+      array(
+        'control' => 'calendar_day_descripton',
+        'cols' => 3,
+        'rows' => 12,
+        'args' => array(
+          'date' => $args['date'],
+        ),
+        'value' => $args['description'],
+      )
+    );
+  }
+  else {
+    $descr_content .= '';//t('- empty -');
+  }
+  $config['calendar_day_description'] = array(
+    'title' => 'Calendar day description',
+    'preset' => XOXO_FIELDS_PRESET_CALENDAR, //'day_description',
+    'delta' => 1,
+    'content' => $descr_content,
+    'status' => array(
+      'callback' => '_xoxo_fields_day_descr_status',
+    ),
+   'static' => 1
+  );
+
+  if(!empty($args['date']) && _xoxo_fields_get_event_nid($args['date'])) {
+    $remove_status = TRUE;
+  }
+  else {
+    $remove_status = FALSE;
+  }
+
+  $config['calendar_day_description_remove'] = array(
+    'title' => 'Remove description',
+    'preset' => XOXO_FIELDS_PRESET_CALENDAR,
+    'delta' => 1,
+    'content' => ($remove_status) ? '<div class="remove-button">'.t('Remove').'</div>' : '<div class="remove-button" style="display:none;">'.t('Remove').'</div>',
+    'status' => 1,
+    'new_action' => 'calendar_day_description_remove',
+  );
+}
+
+function _xoxo_fields_day_descr_status($preset, $action, &$args) {
+  if(!empty($args['date']) && _xoxo_fields_get_event_nid($args['date'])) {
+    $status = TRUE;
+  }
+  else {
+    $status = FALSE;
+  }
+
+  switch($action) {
+    case 'calendar_day_description': {
+      return TRUE;
+    } break;
+    case 'calendar_day_description_remove': {
+      return $status;
+    } break;
+   /* case 'calendar_day_description_add': {
+      return FALSE;
+      return !$status;
+    } break;*/
+  }
+
+  return FALSE;
+}
+
+function _xoxo_fields_delete_shopping_list_item_status($preset, $action, &$args) {
+  if(!empty($args['status'])) {
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+function _xoxo_fields_mark_on_hand_status($preset, $action, &$args) {
+  if(!empty($args['@new'])) {
+    if($action == 'mark_on_hand') {
+      $args['@marked_on_hand'] = 0;
+      return TRUE;
+    }
+    elseif($action == 'unmark_on_hand') {
+      return FALSE;
+    }
+  }
+
+  if(isset($args['@marked_on_hand'])) {
+    if($action == 'mark_on_hand') {
+      return !$args['@marked_on_hand'];
+    }
+    elseif($action == 'unmark_on_hand') {
+      return $args['@marked_on_hand'];
+    }
+  }
+
+  $mark_status = FALSE;
+  if(isset($args['@date2'], $args['@delete_op']['nid'], $args['field_event_recipes'])) {
+    $mark_status = _xoxo_fields_check_mark_status(
+      $action,
+      $args['@date2'],
+      $args['@delete_op']['nid'],
+      $args['field_event_recipes']
+    );
+  }
+
+  if($action == 'mark_on_hand') {
+    $args['@marked_on_hand'] = (int)!$mark_status;
+    return $mark_status;
+  }
+  elseif($action == 'unmark_on_hand') {
+    $args['@marked_on_hand'] = (int)!$mark_status;
+    return !$mark_status;
+  }
+
+  return FALSE;
+}
+
+// determine whether component/recipe is marked on hand (FALSE) or no (TRUE)
+function _xoxo_fields_check_mark_status($action, $timestamp, $event_nid, $item_nid) {
+  static $event_statuses = array();
+
+  if(!isset($event_statuses[$action][$event_nid])) {
+    $event_statuses[$action][$event_nid] = _xoxo_fields_update_event_statuses('view', $event_nid);
+  }
+
+  $key = array_search($item_nid, $event_statuses[$action][$event_nid]);
+  if($key !== FALSE) {
+    unset($event_statuses[$action][$event_nid][$key]);
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+/*
+ * Perform own actions
+ */
+function xoxo_fields_views_drag_drop_perform_actions($action, &$output, &$new_action, $preset, &$args, &$options) {
+  if($action == 'mark_on_hand') {
+    $options['add']['html_class']['parent'] = 'item-mark-on-hand';
+
+    return _xoxo_fields_perform_mark_on_hand(
+      $args['@date2'],
+      $args['@delete_op']['nid'],
+      $args['field_event_recipes'],
+      $args
+    );
+  }
+  elseif($action == 'unmark_on_hand') {
+    $options['remove']['html_class']['parent'] = 'item-mark-on-hand';
+
+    return _xoxo_fields_perform_unmark_on_hand(
+      $args['@date2'],
+      $args['@delete_op']['nid'],
+      $args['field_event_recipes'],
+      $args
+    );
+  }
+  elseif($action == 'delete_shopping_list_item') {
+    return _xoxo_fields_alter_shopping_list_value('', $args, '', TRUE);
+  }
+  elseif($action == 'calendar_day_description_remove') {
+    if(isset($args['date'])) {
+      $nid = _xoxo_fields_get_event_nid($args['date']);
+      if($nid) {
+        node_delete($nid);
+      }
+      return TRUE;
+    }
+  }
+  /*elseif($action == 'calendar_day_description_add') {
+    return TRUE;
+  }*/
+  else {
+    return _xoxo_fields_addcat_perform_actions($action, $output, $new_action, $preset, $args, $options);
+  }
+
+  return FALSE;
+}
+
+/*
+ * Remove event node
+ */
+function _xoxo_fields_get_event_nid($date) {
+  global $user;
+  $q = "
+    SELECT
+      n.nid AS nid
+    FROM
+      node n
+    LEFT JOIN
+      field_data_field_day_description_date f ON n.nid = f.entity_id
+    WHERE
+      f.field_day_description_date_value = :date
+        AND
+      n.uid = :uid
+    LIMIT 1";
+  $result = db_query(
+    $q,
+    array(
+      ':date' => $date,
+      ':uid' => $user->uid
+    )
+  )->fetchField();
+
+  return $result;
+}
+
+// remove items from shopping list
+function _xoxo_fields_perform_mark_on_hand($timestamp, $event_nid, $item_nid, &$args) {
+  $shopping_list_nid = _xoxo_fields_get_shopping_list_by_date_author($timestamp);
+  if(!$shopping_list_nid) {
+    return FALSE;
+  }
+  $shopping_list = node_load($shopping_list_nid);
+  if(!$shopping_list) {
+    return FALSE;
+  }
+  $shopping_lists[$timestamp] = $shopping_list;
+  $type = _xoxo_fields_type_by_nid($item_nid);
+
+  switch ($type) {
+    case XOXO_FIELDS_TYPE_COMPONENT: {
+      if(isset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language])) {
+        foreach($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language] as $delta => $field_data) {
+          if($field_data['event_id'] == $event_nid && $field_data['reference_nid'] == $item_nid) {
+            unset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][$delta]);
+            // save changed shopping list
+            node_save($shopping_list);
+            // update event statuses
+            _xoxo_fields_update_event_statuses('add', $event_nid, $item_nid);
+            $args['@marked_on_hand'] = 1;
+          }
+        }
+      }
+      return TRUE;
+    } break;
+    case XOXO_FIELDS_TYPE_RECIPE: {
+      if(isset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language])) {
+        $flag = FALSE;
+        foreach($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language] as $delta => $field_data) {
+          if($field_data['event_id'] == $event_nid && $field_data['recipe_id'] == $item_nid) {
+            unset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][$delta]);
+            $flag = TRUE;
+          }
+        }
+
+        if($flag) {
+          // save changed shopping list
+          node_save($shopping_list);
+          // update event statuses
+          _xoxo_fields_update_event_statuses('add', $event_nid, $item_nid);
+          $args['@marked_on_hand'] = 1;
+        }
+      }
+      return TRUE;
+    } break;
+  }
+
+  return FALSE;
+}
+
+function _xoxo_fields_update_event_statuses($op, $event_nid, $item_nid = NULL, $delta = NULL) {
+  $event = node_load($event_nid);
+  $item_statuses = _xoxo_fields_get_event_statuses($event_nid);
+
+  if($op == 'view' || (is_null($item_nid) && is_null($delta))) {
+    if(is_null($item_nid) && is_null($delta)) {
+      return $item_statuses;
+    }
+    elseif(!is_null($delta)) {
+      return (isset($item_statuses[$delta])) ? $item_statuses[$delta] : FALSE;
+    }
+  }
+  elseif($op == 'add') {
+    $item_statuses[] = $item_nid;
+  }
+  elseif($op == 'remove') {
+    $key = array_search($item_nid, $item_statuses);
+    if($key !== FALSE) {
+      unset($item_statuses[$key]);
+    }
+  }
+
+  $event->{XOXO_FIELDS_EVENT_STATUSES_FIELD}[$event->language][0]['value'] = serialize($item_statuses);
+  node_save($event);
+}
+
+
+// add items to shopping list
+function _xoxo_fields_perform_unmark_on_hand($timestamp, $event_nid, $item_nid, &$args) {
+  $shopping_list_nid = _xoxo_fields_get_shopping_list_by_date_author($timestamp);
+
+  if(!$shopping_list_nid) {
+    return FALSE;
+  }
+
+  $shopping_list = node_load($shopping_list_nid);
+  if(!$shopping_list) {
+    return FALSE;
+  }
+  $shopping_lists[$timestamp] = $shopping_list;
+
+  $type = _xoxo_fields_type_by_nid($item_nid);
+
+  switch ($type) {
+    case XOXO_FIELDS_TYPE_COMPONENT: {
+      global $user;
+      // load component
+      $component = node_load($item_nid);
+      if(!$component) {
+        return FALSE;
+      }
+      $item = array(
+        'reference_nid' => $component->nid,
+        'qty' => $component->{XOXO_FIELDS_COMPONENT_QTY_FIELD}[$component->language][0]['value'],
+        'uom' => $component->{XOXO_FIELDS_COMPONENT_UOM_FIELD}[$component->language][0]['tid'],
+        'last_added' => time(),
+        'user_uid' => $user->uid,
+        'status' => 0,
+        'event_id' => $event_nid,
+        'recipe_id' => 0, // there must be recipe id otherwise 0
+      );
+      $shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][] = $item;
+      _xoxo_fields_update_event_statuses('remove', $event_nid, $item_nid);
+      // save changed shopping list
+      node_save($shopping_list);
+      $args['@marked_on_hand'] = 0;
+      return TRUE;
+    } break;
+    case XOXO_FIELDS_TYPE_RECIPE: {
+      global $user;
+      // load recipe
+      $recipe = node_load($item_nid);
+      if(!$recipe || !isset($recipe->{XOXO_FIELDS_RECIPE_INGREDIENTS_FIELD}[$recipe->language])) {
+        return FALSE;
+      }
+
+      foreach($recipe->{XOXO_FIELDS_RECIPE_INGREDIENTS_FIELD}[$recipe->language] as $delta => $field_data) {
+        $item = array(
+          'reference_nid' => $field_data['nid'],
+          'qty' => (float)$field_data['amount'],
+          'uom' => $field_data['unit'],
+          'last_added' => time(),
+          'user_uid' => $user->uid,
+          'status' => 0,
+          'event_id' => $event_nid,
+          'recipe_id' => $recipe->nid,
+        );
+        $shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][] = $item;
+      }
+
+      _xoxo_fields_update_event_statuses('remove', $event_nid, $item_nid);
+      // save changed shopping list
+      node_save($shopping_list);
+      $args['@marked_on_hand'] = 0;
+      return TRUE;
+    } break;
+  }
+
+  return FALSE;
+}
+
+function _xoxo_fields_add_components_to_shopping_list($event_nid, $args) {
+  if(!isset($args['field_event_date'])) {
+    return FALSE;
+  }
+  $shopping_list_nid = _xoxo_fields_get_shopping_list_by_date_author($args['field_event_date']);
+
+  if(!$shopping_list_nid) {
+    $shopping_list = _xoxo_fields_autocreate_shopping_list($args['field_event_date']);
+  }
+  else {
+    $shopping_list = node_load($shopping_list_nid);
+  }
+
+  if(!$shopping_list) {
+    return FALSE;
+  }
+
+  $type = (!empty($args['@type'])) ? $args['@type'] : _xoxo_fields_type_by_nid($args['field_event_recipes']);
+
+  switch ($type) {
+    case XOXO_FIELDS_TYPE_COMPONENT: {
+      if(!empty($args['@marked_on_hand'])) {
+        // add status for current event and item
+        _xoxo_fields_update_event_statuses('add', $event_nid, $args['field_event_recipes']);
+        return TRUE;
+      }
+      else {
+        global $user;
+        if(empty($args['@qty']) && empty($args['@uom'])) {
+          $component = node_load($args['field_event_recipes']);
+          if(!$component) {
+            return FALSE;
+          }
+          $qty = (!empty($component->{XOXO_FIELDS_COMPONENT_QTY_FIELD}[$component->language][0]['value'])) ? $component->{XOXO_FIELDS_COMPONENT_QTY_FIELD}[$component->language][0]['value'] : 1;
+          $uom = (!empty($component->{XOXO_FIELDS_COMPONENT_UOM_FIELD}[$component->language][0]['tid'])) ? $component->{XOXO_FIELDS_COMPONENT_UOM_FIELD}[$component->language][0]['tid'] : 0;
+        }
+        else {
+          $qty = (!empty($args['@qty'])) ? $args['@qty'] : 1;
+          $uom = (!empty($args['@uom'])) ? $args['@uom'] : 0;
+        }
+
+        $item = array(
+          'reference_nid' => $args['field_event_recipes'],
+          'qty' => $qty,
+          'uom' => $uom,
+          'last_added' => time(),
+          'user_uid' => $user->uid,
+          'status' => 0,
+          'event_id' => $event_nid,
+          'recipe_id' => 0,
+        );
+        if(isset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language])) {
+          $shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][] = $item;
+        }
+        else {
+          $shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][0] = $item;
+
+        }
+
+        // save changed shopping list
+        node_save($shopping_list);
+        return TRUE;
+      }
+    } break;
+    case XOXO_FIELDS_TYPE_RECIPE: {
+      if(!empty($args['@marked_on_hand'])) {
+        // add status for current event and item
+        _xoxo_fields_update_event_statuses('add', $event_nid, $args['field_event_recipes']);
+        return TRUE;
+      }
+      else {
+        global $user;
+        // load recipe
+        $recipe = node_load($args['field_event_recipes']);
+        if(!$recipe || !isset($recipe->{XOXO_FIELDS_RECIPE_INGREDIENTS_FIELD}[$recipe->language])) {
+          return FALSE;
+        }
+
+        foreach($recipe->{XOXO_FIELDS_RECIPE_INGREDIENTS_FIELD}[$recipe->language] as $delta => $field_data) {
+          $quantity = $field_data['amount'];
+          if(!is_numeric($quantity)) {
+            $parts = explode('/', $quantity);
+            if(count($parts) == 2 && is_numeric($parts[0]) && is_numeric($parts[1]) && $parts[1] > 0) {
+              $quantity = round($parts[0]/$parts[1], 2);
+            }
+            else {
+              $quantity = 0;
+            }
+          }
+    
+          $item = array(
+            'reference_nid' => $field_data['nid'],
+            'qty' => $quantity,
+            'uom' => $field_data['unit'],
+            'last_added' => time(),
+            'user_uid' => $user->uid,
+            'status' => 0,
+            'event_id' => $event_nid,
+            'recipe_id' => $recipe->nid,
+          );
+          $shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][] = $item;
+        }
+
+        // save changed shopping list
+        node_save($shopping_list);
+        return TRUE;
+      }
+
+    } break;
+  }
+
+  return FALSE;
+}
+
+// remove component/components from shopping list
+function _xoxo_fields_remove_components_from_shopping_list($timestamp, $event_nid, $component_nid, $args) {
+  $shopping_list_nid = _xoxo_fields_get_shopping_list_by_date_author($timestamp);
+  if(!$shopping_list_nid) {
+    return FALSE;
+  }
+  $shopping_list = node_load($shopping_list_nid);
+  if(!$shopping_list) {
+    return FALSE;
+  }
+  $type = _xoxo_fields_type_by_nid($component_nid);
+
+  switch ($type) {
+    case XOXO_FIELDS_TYPE_COMPONENT: {
+      if(!empty($args['@marked_on_hand'])) {
+        // remove status for current event and item
+        _xoxo_fields_update_event_statuses('remove', $event_nid, $component_nid);
+      }
+      else {
+        if(isset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language])) {
+          foreach($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language] as $delta => $field_data) {
+            if($field_data['event_id'] == $event_nid && $field_data['reference_nid'] == $component_nid) {
+              unset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][$delta]);
+              // save changed shopping list
+              node_save($shopping_list);
+            }
+          }
+        }
+      }
+      return TRUE;
+    } break;
+    case XOXO_FIELDS_TYPE_RECIPE: {
+      if(!empty($args['@marked_on_hand'])) {
+        // remove status for current event and item
+        _xoxo_fields_update_event_statuses('remove', $event_nid, $component_nid);
+      }
+      else {
+        if(isset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language])) {
+          $flag = FALSE;
+          foreach($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language] as $delta => $field_data) {
+            if($field_data['event_id'] == $event_nid && $field_data['recipe_id'] == $component_nid) {
+              unset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][$delta]);
+              $flag = TRUE;
+            }
+          }
+          if($flag) {
+            // save changed shopping list
+            node_save($shopping_list);
+          }
+        }
+      }
+      return TRUE;
+    } break;
+  }
+
+  return FALSE;
+}
+
+function _xoxo_fields_autocreate_shopping_list($timestamp, $uid = NULL) {
+  if(is_null($uid)) {
+    global $user;
+    $uid = $user->uid;
+  }
+
+  if (date('w', $timestamp) == 0) {
+    $beginning_of_week = strtotime('today', $timestamp);
+  }
+  else {
+    $beginning_of_week = strtotime('last Sunday', $timestamp);
+  }
+
+  $node = new stdClass();
+  $node->type = XOXO_FIELDS_TYPE_SHOPPING_LIST;
+  $node->title = 'Shopping list '.date('j/n/Y', $beginning_of_week).' - '.$uid;
+  $node->status = 1;
+  $node->promote = 0;
+  $node->sticky = 0;
+  $node->uid = $uid;
+  $node->language = LANGUAGE_NONE;
+
+  node_object_prepare($node);
+  $node->{XOXO_SHL_DATE_FIELD}[$node->language][0]['value'] = $beginning_of_week;
+  $node = node_submit($node);
+
+  return $node;
+}
+
+/*
+ * Implements hook_views_drag_drop_node_presave().
+ */
+function xoxo_fields_views_drag_drop_node_presave(&$node, &$response, &$drag_args, &$drop_args, $preset, $settings) {
+  if($preset == XOXO_FIELDS_PRESET_CALENDAR) {
+    if(!empty($drag_args['@new'])) {
+      $drag_args['@date2'] = $drop_args['field_event_date'];
+    }
+
+    // add components to appropriate shopping list
+    $all_args = array_merge_recursive($drag_args, $drop_args);
+    _xoxo_fields_add_components_to_shopping_list($node->nid, $all_args);
+  }
+}
+
+/*
+ * Implements hook_views_drag_drop_delete_field_item().
+ */
+function xoxo_fields_views_drag_drop_delete_field_item($params, $args, $preset, $settings) {
+  if($preset == XOXO_FIELDS_PRESET_CALENDAR) {
+    if(isset($args['@date2'], $args['@delete_op']['nid'], $args['field_event_recipes'])) {
+      _xoxo_fields_remove_components_from_shopping_list($args['@date2'], $args['@delete_op']['nid'], $args['field_event_recipes'], $args);
+      // update event statuses field - remove item if needed
+      _xoxo_fields_update_event_statuses('remove', $args['@delete_op']['nid'], $args['field_event_recipes']);
+    }
+  }
+}
+
+/*
+ * Implements hook_views_drag_drop_node_alter().
+ */
+function xoxo_fields_views_drag_drop_node_alter(&$node, &$response, &$drag_args, &$drop_args, $preset, $settings) {
+  if($preset == XOXO_FIELDS_PRESET_SHOPPING_LIST) {
+    $node->{XOXO_SHL_ITEMS_FIELD}[$node->language][count($node->{XOXO_SHL_ITEMS_FIELD}[$node->language])-1]['last_added'] = time();
+    $item_data = end($node->{XOXO_SHL_ITEMS_FIELD}[$node->language]);
+    global $user;
+    $edit_status = FALSE;
+    if(isset($node->{XOXO_SHL_DATE_FIELD}[$node->language][0]['value']) && _xoxo_fields_week_status($node->{XOXO_SHL_DATE_FIELD}[$node->language][0]['value'])) {
+      $edit_status = TRUE;
+    }
+
+    $description = _xoxo_fields_descriptions_by_nids(array($drag_args['@component_nid']));
+    $description = (isset($description[$drag_args['@component_nid']])) ? $description[$drag_args['@component_nid']] : '';
+
+    $title = _xoxo_fields_component_name($drag_args['@cname_id']);
+    if(!$title) {
+      $node_title = _xoxo_fields_nodetitles_by_nids(array($item_data['reference_nid']));
+      $title = $node_title[$item_data['reference_nid']];
+    }
+    $item_rendered = theme(
+      'xoxo_fields_shopping_list',
+      array(
+        'component_title' => $title, //_xoxo_fields_component_name($drag_args['@cname_id']),
+        'brand' => _xoxo_fields_brandname_by_bid($drag_args['@brand']),
+        'description' => $description,
+        'qty' => _xoxo_fields_qty_inplaceedit(
+          $node->nid,
+          $drag_args['field_shopping_list_items']['qty'],
+          $item_data['reference_nid'],
+          $item_data['event_id'],
+          $item_data['recipe_id'],
+          $item_data['last_added'],
+          $edit_status
+        ),
+        'uom' => _xoxo_fields_uom_inplaceedit(
+          $node->nid,
+          (!is_null($drag_args['@uom'])) ? $drag_args['@uom'] : t('unknown'),
+          (isset($drag_args['field_shopping_list_items']['uom'])) ? $drag_args['field_shopping_list_items']['uom'] : 0,
+          $item_data['reference_nid'],
+          $item_data['event_id'],
+          $item_data['recipe_id'],
+          $item_data['last_added'],
+          $edit_status
+        ),
+
+        'user_name' => $user->name,
+        'last_added' => _xoxo_fields_calculate_last_added_timestamp(
+          $item_data['reference_nid'],
+          $item_data['last_added'],
+          $item_data['event_id'],
+          $item_data['recipe_id']
+        ),
+        'status' => $item_data['status'],
+        'event_id' => $item_data['event_id'],
+        'recipe_id' => $item_data['recipe_id'],
+      )
+    );
+
+    $item_rendered = theme(
+      'views_drag_drop_operations',
+      array(
+        'content' => $item_rendered,
+        'preset' => XOXO_FIELDS_PRESET_SHOPPING_LIST,
+        'args' => array(
+          'nid' => $node->nid,
+          'reference_nid' => $item_data['reference_nid'],
+          'event_id' => $item_data['event_id'],
+          'recipe_id' => $item_data['recipe_id'],
+          'last_added' => $item_data['last_added'],
+          'status' => 1,
+        ),
+      )
+    );
+
+    $response['html'] = '<div class="shopping-list-item new-shopping-list-item">'.$item_rendered.'</div>';
+
+    $cat = (!empty($drag_args['@cat_id'])) ? $drag_args['@cat_id'] : 2432; // "other" = 2432 instead of "unknown" = 0
+
+    $response['custom_triggers']['expand_section'] = array(
+      'element' => '.item-category-'.$cat.' .fieldset-title',
+      'event' => 'click',
+      'conditions' => array(
+        array(
+          'element' => '.item-category-'.$cat.' .fieldset-wrapper',
+          'type' => 'css',
+          'attribute' => 'display',
+          'value' => 'none',
+        ),
+      ),
+    );
+
+    $response['custom_triggers']['hide_empty_message'] = array(
+      'element' => '.ept',
+      'method' => 'hide',
+    );
+
+    /*
+    $response['custom_triggers']['show_empty_message'] = array(
+      'element' => '.ept',
+      'method' => 'show',
+      'conditions' => array(
+        array(
+          'element' => '#shopping-list-content .shopping-list-item',
+          'type' => 'length',
+          'attribute' => '',
+          'value' => 0,
+          'rule' => '>',
+        ),
+      ),
+    );*/
+
+    // get category for new item
+    $cats = _xoxo_fields_extract_categories($node->{XOXO_SHL_ITEMS_FIELD}[$node->language], $drag_args['@cat_id']);
+
+    // add new category
+    if(count($cats[$drag_args['@cat_id']]['nids']) == 1) {
+      $response['element'] = '.item-droppable-shopping_list';
+      $response['html'] =
+       '<fieldset class="item-category collapsible item-category-'.$drag_args['@cat_id'].' form-wrapper collapse-processed">
+          <legend>
+            <span class="fieldset-legend">
+              <a style="cursor:pointer;" class="fieldset-title fieldset-title-new">
+                <span class="fieldset-legend-prefix element-invisible">Hide</span>'.$cats[$drag_args['@cat_id']]['name'].'
+              </a>
+              <span class="summary"></span>
+            </span>
+          </legend>
+          <div class="fieldset-wrapper" style="cursor: auto;">
+           '.$response['html'].'
+          </div>
+        </fieldset>';
+    }
+  }
+  elseif($preset == XOXO_FIELDS_PRESET_CALENDAR) {
+    if(!empty($drag_args['@new'])) {
+      $drag_args['@date2'] = $drop_args['field_event_date'];
+    }
+    // add components to appropriate shopping list
+    $all_args = array_merge_recursive($drag_args, $drop_args);
+    _xoxo_fields_add_components_to_shopping_list($node->nid, $all_args);
+  }
+}
+
+
+function _xoxo_fields_qty_inplaceedit($nid, $qty, $reference_nid, $event_id, $recipe_id, $last_added, $status) {
+  $qty = sprintf("%01.2f", (float)$qty);
+  if(!$status) {
+    return $qty;
+  }
+
+  if(module_exists('inplaceedit')) {
+    return theme(
+      'inplaceedit_textfield',
+      array(
+        'control' => 'shopping_list_qty',
+        'args' => array(
+          'nid' => $nid,
+          'reference_nid' => $reference_nid,
+          'event_id' => $event_id,
+          'recipe_id' => $recipe_id,
+          'last_added' => $last_added
+        ),
+        'value' => $qty,
+      )
+    );
+  }
+
+  return $qty;
+}
+
+function _xoxo_fields_uom_inplaceedit($nid, $value, $uom, $reference_nid, $event_id, $recipe_id, $last_added, $status) {
+  return $value;
+  // prevent inplaceedit functionality
+  if(!$status) {
+    return $value;
+  }
+  if(module_exists('inplaceedit')) {
+    $uoms = array();
+    $q = "
+      SELECT
+        t.tid AS tid,
+        t.name AS uom
+      FROM
+        taxonomy_term_data t
+      WHERE
+        t.vid = ".XOXO_FIELDS_UOM_VID;
+    $result = db_query($q)->fetchAll();
+    foreach($result as $item) {
+      $uoms[$item->tid] = $item->uom;
+    }
+    return theme(
+      'inplaceedit_select',
+      array(
+        'control' => 'shopping_list_uom',
+        'default_item' => $uom,
+        'select' => $uoms,
+        'args' => array(
+          'nid' => $nid,
+          'reference_nid' => $reference_nid,
+          'event_id' => $event_id,
+          'recipe_id' => $recipe_id,
+          'last_added' => $last_added
+        ),
+        'value' => $value,
+      )
+    );
+  }
+
+  return $value;
+}
+
+/*
+ * Implementation of hook_inplaceedit_assign_controls
+ */
+function xoxo_fields_inplaceedit_assign_controls() {
+  $controls = array(
+    'shopping_list_qty' => 'shopping list - Qty',
+    'shopping_list_uom' => 'shopping list - UOM',
+    'calendar_day_descripton' => 'calendar - Day Description',
+  );
+
+  return $controls;
+}
+
+/*
+ * Implementation of hook_inplaceedit_perform_changes
+ */
+function xoxo_fields_inplaceedit_perform_changes($control, &$value, &$args, $prev_value) {
+  switch($control) {
+    case 'shopping_list_qty': {
+      $value = str_replace(',', '.', trim($value));
+      if(!is_numeric($value)) {
+        return FALSE;
+      }
+      $value = sprintf("%01.2f", floatval($value));
+      return _xoxo_fields_alter_shopping_list_value($value, $args, 'qty');
+    } break;
+    case 'shopping_list_uom': {
+      if(!is_numeric($value)) {
+        return FALSE;
+      }
+      return _xoxo_fields_alter_shopping_list_value($value, $args, 'uom');
+    } break;
+    case 'calendar_day_descripton': {
+      if(isset($args['nid'])) {
+        $day_description = _xoxo_fields_set_day_description(check_plain($value), $args['nid'], NULL);
+        $args['day'] = (int)date('w', $args['date'])+1;
+        return TRUE;
+      }
+      elseif(isset($args['date'])) {
+        $day_description = _xoxo_fields_set_day_description(check_plain($value), NULL, $args['date']);
+        $args['day'] = (int)date('w', $args['date'])+1;
+        if(!empty($day_description->nid)) {
+          $args['nid'] = $day_description->nid;
+          return TRUE;
+        }
+      }
+      return FALSE;
+    } break;
+  }
+}
+
+function _xoxo_fields_set_day_description($value, $nid = NULL, $date = NULL) {
+  global $user;
+  if(!is_null($nid)) {
+    $dd = node_load($nid);
+    if(!empty($dd)) {
+      // set value for description
+      $dd->{XOXO_FIELDS_DAYD_TEXT}[LANGUAGE_NONE][0]['value'] = $value;
+      node_save($dd);
+      return $dd;
+    }
+  }
+  elseif(!is_null($date)) {
+    $q = "
+      SELECT
+        f.entity_id AS nid
+      FROM
+        field_data_".XOXO_FIELDS_DAYD_DATE." f
+      LEFT JOIN
+        node n ON n.nid = f.entity_id
+      WHERE
+          n.uid = :uid
+        AND
+          ".XOXO_FIELDS_DAYD_DATE."_value = :date
+      LIMIT 1";
+    $result = db_query(
+      $q,
+      array(
+        ':date' => $date,
+        ':uid' => $user->uid,
+      )
+    )->fetchAll();
+    if(!empty($result[0]->nid)) {
+      $dd = node_load($result[0]->nid);
+      if(!$dd) {
+        return FALSE;
+      }
+      // set value for description
+      $dd->{XOXO_FIELDS_DAYD_TEXT}[LANGUAGE_NONE][0]['value'] = $value;
+      node_save($dd);
+      return $dd;
+    }
+    else {
+      return _xoxo_fields_create_day_description($value, $date);
+    }
+  }
+}
+
+function _xoxo_fields_get_day_description($date, $nl2br = TRUE) {
+  global $user;
+  $q = "
+    SELECT
+      f.entity_id AS nid
+    FROM
+      field_data_".XOXO_FIELDS_DAYD_DATE." f
+    LEFT JOIN
+      node n ON n.nid = f.entity_id
+    WHERE
+        n.uid = :uid
+      AND
+        ".XOXO_FIELDS_DAYD_DATE."_value = :date
+    LIMIT 1";
+  $result = db_query(
+    $q,
+    array(
+      ':date' => $date,
+      ':uid' => $user->uid,
+    )
+  )->fetchAll();
+  if(!empty($result[0]->nid)) {
+    $dd = node_load($result[0]->nid);
+    if(!$dd) {
+      return FALSE;
+    }
+
+    return (!empty($dd->{XOXO_FIELDS_DAYD_TEXT}[LANGUAGE_NONE][0]['value'])) ? (($nl2br) ? nl2br($dd->{XOXO_FIELDS_DAYD_TEXT}[LANGUAGE_NONE][0]['value']) : $dd->{XOXO_FIELDS_DAYD_TEXT}[LANGUAGE_NONE][0]['value'])  : FALSE;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+function _xoxo_fields_create_day_description($text, $date) {
+  global $user;
+  $node = new stdClass();
+  $node->type = 'day_description';
+  $node->title = 'Day description '.date('d/m/Y', $date).' - '.$user->uid;
+  $node->language = LANGUAGE_NONE;
+  $node->uid = $user->uid;
+  $node->{XOXO_FIELDS_DAYD_TEXT}[LANGUAGE_NONE][0]['value'] = $text;
+  $node->{XOXO_FIELDS_DAYD_DATE}[LANGUAGE_NONE][0]['value'] = $date;
+  node_object_prepare($node);
+  $node = node_submit($node);
+  node_save($node);
+  return $node;
+}
+
+function _xoxo_fields_alter_shopping_list_value($value, $args, $key, $delete = NULL) {
+  if(!isset($args['nid'])) {
+    return FALSE;
+  }
+  $shopping_list = node_load($args['nid']);
+  if(!$shopping_list || empty($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language])) {
+    return FALSE;
+  }
+  foreach($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language] as $delta => $item) {
+    if(isset($item['reference_nid'], $item['event_id'], $item['recipe_id'], $item['last_added'])) {
+      if( $item['reference_nid'] == $args['reference_nid'] &&
+          $item['event_id'] == $args['event_id'] &&
+          $item['recipe_id'] == $args['recipe_id'] &&
+          $item['last_added'] == $args['last_added'] ) {
+        if(!is_null($delete)) {
+          _xoxo_fields_correct_event($args['event_id'], $args['reference_nid'], $args['recipe_id'], $shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language]);
+          unset($shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][$delta]);
+        }
+        else {
+          $shopping_list->{XOXO_SHL_ITEMS_FIELD}[$shopping_list->language][$delta][$key] = $value;
+        }
+        node_save($shopping_list);
+        return TRUE;
+      }
+    }
+  }
+
+  return FALSE;
+}
+
+function _xoxo_fields_correct_event($event_id, $reference_nid, $recipe_id, $field_data) {
+  if(!$event_id) {
+    return FALSE;
+  }
+
+  $statuses = _xoxo_fields_get_event_statuses($event_id);
+
+  if(!$recipe_id) {
+   $statuses[] = $reference_nid;
+   _xoxo_fields_set_event_statuses($event_id, $statuses);
+   return TRUE;
+  }
+  else {
+    $components = 0;
+    foreach($field_data as $item) {
+      if($item['event_id'] == $event_id &&
+        $item['recipe_id'] == $recipe_id) {
+        $components++;
+        if($components > 1) {
+          return FALSE;
+        }
+      }
+    }
+    $statuses[] = $recipe_id;
+    _xoxo_fields_set_event_statuses($event_id, $statuses);
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+function _xoxo_fields_get_event_statuses($event_id) {
+  $q = "
+    SELECT
+      f.field_event_statuses_value AS statuses
+    FROM
+      field_data_field_event_statuses f
+    WHERE
+      entity_id = :nid
+    LIMIT 1";
+
+  $statuses = db_query($q, array(':nid' => $event_id))->fetchAll();
+  return (!empty($statuses)) ? unserialize($statuses[0]->statuses) : array();
+}
+
+function _xoxo_fields_set_event_statuses($event_id, $statuses) {
+  $q = "
+    SELECT
+      *
+    FROM
+      field_data_field_event_statuses f
+    WHERE
+      entity_id = :nid
+    LIMIT 1";
+  $exists = db_query($q, array(':nid' => $event_id))->rowCount();
+
+  if($exists) {
+    $q = "
+      UPDATE
+        field_data_field_event_statuses
+      SET
+        field_event_statuses_value = :value
+      WHERE
+        entity_id = :nid";
+    db_query($q, array(':value' => serialize($statuses), ':nid' => $event_id));
+  }
+  else {
+    $q = "
+      INSERT INTO
+        field_data_field_event_statuses
+        (entity_type, bundle, deleted, entity_id, revision_id, language, delta, field_event_statuses_value, field_event_statuses_format)
+      VALUES
+        ('node', 'event', 0, :nid, :nid, 'und', 0, :statuses, NULL)";
+    db_query($q, array(':nid' => $event_id, ':statuses' => serialize($statuses)));
+  }
+}
+
+
+function _xoxo_fields_component_name($cname_id) {
+  return db_query("
+    SELECT
+      names.value AS name
+    FROM
+      {" . XOXO_NAMES . "} names
+    WHERE
+      names.aid = :aid",
+    array(
+      ':aid' => $cname_id
+    )
+  )->fetchField();
+}
+
+function _xoxo_fields_type_by_nid($nid) {
+  return db_query("
+    SELECT
+      n.type AS type
+    FROM
+      {node} n
+    WHERE
+      nid = :nid",
+    array(
+      ':nid' => $nid
+    )
+  )->fetchField();
+}
+
+function _xoxo_debug($variable, $name = 'variable', $type = 'XOXO') {
+  $data_temp = '<pre>'.print_r($variable, TRUE).'</pre>';
+  watchdog($type, $name.':'.$data_temp);
+}
+
+function _xoxo_fields_extract_categories($field, $cat_id) {
+  $component_nids = array_map('_xoxo_fields_flatten_array', $field);
+
+  return _xoxo_fields_tids_by_nids($component_nids, 1, $cat_id);
+}
+
+function _xoxo_fields_flatten_array($element) {
+  return $element['reference_nid'];
+}
+
+function _xoxo_fields_description($description) {
+  if (strlen($description) > XOXO_FIELDS_LEN) {
+    $a = substr(trim($description), 0, XOXO_FIELDS_LEN);
+    $b = strrpos($a, ' ');
+    $c = substr($a, 0, $b);
+    return $c . XOXO_FIELDS_END;
+  }
+  else {
+    return $description;
+  }
+}
+
+function _xoxo_fields_sl_table($items, $vid, $nid = FALSE) {
+  $s = ' ';
+  $rep = 'x';
+  $h = array(XOXO_FIELDS_CATEGORY, XOXO_FIELDS_PRODUCT, XOXO_FIELDS_DESCRIPTION, XOXO_FIELDS_BRAND, XOXO_FIELDS_AMOUNT);
+  $classes = array('category', 'name', 'description', 'brand', 'amount');
+  $r = array(
+    '#theme' => 'table',
+    '#header' => array_map('t', $h),
+    '#attributes' => array('cellspacing' => 0),
+    '#sticky' => FALSE
+  );
+  foreach($classes as $class) {
+    $r['#colgroups'][0][]['class'][] = $class;
+  }
+  $ref_nids = array_map('_xoxo_fields_get_ref_nids', $items);
+  $nids = array();
+  $tids = array();
+  $last_tid = '';
+  $cats = _xoxo_fields_tids_by_nids($ref_nids, 0, 0, $nid);
+  foreach($cats as $category) {
+    $nids[] = $category['nid'];
+    if ($last_tid === $category['tid']) {
+      $tids[$category['tid']]++;
+    }
+    else {
+      $tids[$category['tid']] = 1;
+      $last_tid = $category['tid'];
+    }
+  }
+  $titles = _xoxo_fields_titles_by_nids($nids) + _xoxo_fields_nodetitles_by_nids($nids);
+  $descriptions = _xoxo_fields_descriptions_by_nids($nids);
+  $brands = _xoxo_fields_brandnames_by_nids($nids);
+  $uoms = _xoxo_fields_terms_by_vid($vid);
+  $last_tid = '';
+  foreach ($nids as $nid) {
+    $desc = _xoxo_fields_description($descriptions[$nid]);
+    if ($last_tid === $cats[$nid]['tid']) {
+      $r['#rows'][$nid] = array($titles[$nid], $desc, $brands[$nid]);
+    }
+    else {
+      $group = array('data' => $cats[$nid]['name'], 'rowspan' => $tids[$cats[$nid]['tid']]);
+      $r['#rows'][$nid] = array($group, $titles[$nid], $desc, $brands[$nid]);
+      $last_tid = $cats[$nid]['tid'];
+    }
+  }
+  $amounts = array();
+  foreach ($items as $item) {
+    $key = $item['reference_nid'] . '_' . $item['qty'] . '_' . $item['uom'];
+    $amounts[$key] = isset($amounts[$key]) ? $amounts[$key] + 1 : 1;
+  }
+  foreach($amounts as $key => $repeats) {
+    list($nid, $qty, $unit) = explode('_', $key);
+    $rpts = $repeats > 1 ? $rep . $s . $repeats : NULL;
+    $amount = _xoxo_search_frac_string($qty) . $s . $uoms[$unit] . $s . $rpts;
+    $r['#rows'][$nid][4] =
+      isset($r['#rows'][$nid][4])
+      ? trim($r['#rows'][$nid][4]) . XOXO_FIELDS_SEP . $amount
+      : $amount;
+  }
+  return $r;
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function xoxo_fields_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  if ($display['type'] == 'field_xoxo_shopping_list_item_mail_formatter') {
+    return _xoxo_fields_sl_table($items, $field['settings']['uom_voc'], $entity->nid);
+  }
+  if($display['type'] == 'field_xoxo_shopping_list_item_formatter' || $display['type'] == 'field_xoxo_shopping_list_item_mail_formatter') {
+    if($display['type'] == 'field_xoxo_shopping_list_item_mail_formatter') {
+      $theme_function = 'xoxo_fields_shopping_list_mail';
+      $email = TRUE;
+    }
+    else {
+      $theme_function = 'xoxo_fields_shopping_list';
+      $email = FALSE;
+    }
+
+    global $user;
+    $date_value =
+      (isset($entity->{XOXO_SHL_DATE_FIELD}[$entity->language][0]['value']))
+      ? $entity->{XOXO_SHL_DATE_FIELD}[$entity->language][0]['value']
+      : 0;
+    $edit_status = _xoxo_fields_week_status($date_value);
+
+    if(!$email) {
+      $element = array(
+        '#prefix' => theme(
+          'views_drag_drop_droppable',
+          array(
+            'preset' => 'shopping_list',
+            'args' => array(
+              'nid' => $entity->nid,
+              'uid' => $entity->uid,
+              '@date' => time(), //need to rewrite in xoxo_fields_views_drag_drop_node_alter
+              'field_shopping_list_items:last_added' => time(),
+              'field_shopping_list_items:user_uid' => $user->uid,
+              'field_shopping_list_items:status' => 0,
+              'field_shopping_list_items:event_id' => 0,
+              'field_shopping_list_items:recipe_id' => 0,
+            ),
+            'status' => $edit_status,
+            'prefix_only' => TRUE,
+          )
+        ),
+        '#suffix' => '</div>',
+      );
+    }
+    else {
+      $element = array();
+    }
+ /* }
+
+  if(
+    $display['type'] == 'field_xoxo_shopping_list_item_formatter'
+    || $display['type'] == 'field_xoxo_shopping_list_item_mail_formatter'
+  ) {
+ */
+    $ref_nids = array_map('_xoxo_fields_get_ref_nids', $items);
+    $caregories = _xoxo_fields_tids_by_nids($ref_nids, 0, 0, $entity->nid);
+    $ref_uids = array_map('_xoxo_fields_get_ref_uids', $items);
+    $titles = _xoxo_fields_titles_by_nids($ref_nids);
+    $node_titles = _xoxo_fields_nodetitles_by_nids($ref_nids);
+    $names = _xoxo_fields_names_by_uids($ref_uids);
+    $brands = _xoxo_fields_brandnames_by_nids($ref_nids);
+    $descriptions = _xoxo_fields_descriptions_by_nids($ref_nids);
+    $uoms = _xoxo_fields_terms_by_vid($field['settings']['uom_voc']);
+    $element['terms'] = array(0 => t('Unknown'));
+    foreach($caregories as $cat_item) {
+      $element['data'][$cat_item['tid']] = array();
+    }
+    foreach ($items as $delta => $item) {
+      $cat = (isset($caregories[$item['reference_nid']]['tid'])) ? $caregories[$item['reference_nid']]['tid'] : 2432; // "other" = 2432 instead of "unknown" = 0
+      if(!isset($element['terms'][$cat])) {
+        $element['terms'][$cat] = (isset($caregories[$item['reference_nid']]['name'])) ? $caregories[$item['reference_nid']]['name'] : t('Other');
+      }
+
+      $event_nid = isset($item['event_id']) ? $item['event_id'] : 0;
+      $recipe_nid = isset($item['recipe_id']) ? $item['recipe_id'] : 0;
+      $last_added = _xoxo_fields_calculate_last_added_timestamp($item['reference_nid'], $item['last_added'], $event_nid, $recipe_nid, $entity->uid);
+
+      $item_rendered = theme(
+        $theme_function, //'xoxo_fields_shopping_list',
+        array(
+          'component_title' => (isset($titles[$item['reference_nid']])) ? $titles[$item['reference_nid']] : $node_titles[$item['reference_nid']],
+          'brand' => (isset($brands[$item['reference_nid']])) ? $brands[$item['reference_nid']] : '',
+          'qty' =>  ($email) ? $item['qty'] : _xoxo_fields_qty_inplaceedit(
+            $entity->nid,
+            $item['qty'],
+            $item['reference_nid'],
+            $item['event_id'],
+            $item['recipe_id'],
+            $item['last_added'],
+            $edit_status
+           ),
+          'description' => (isset($descriptions[$item['reference_nid']])) ? $descriptions[$item['reference_nid']] : '',
+          'uom' =>_xoxo_fields_uom_inplaceedit(
+            $entity->nid,
+            (isset($uoms[$item['uom']])) ? $uoms[$item['uom']] : t('unknown'),
+            $item['uom'],
+            $item['reference_nid'],
+            $item['event_id'],
+            $item['recipe_id'],
+            $item['last_added'],
+            $edit_status
+          ),
+
+          'user_name' => $names[$item['user_uid']],
+          'last_added' => $last_added,
+          'status' => $item['status'],
+          'event_id' => $event_nid,
+          'recipe_id' => $recipe_nid,
+        )
+      );
+
+      if(!$email) {
+        $item_rendered = theme(
+          'views_drag_drop_operations',
+          array(
+            'content' => $item_rendered,
+            'preset' => XOXO_FIELDS_PRESET_SHOPPING_LIST,
+            'args' => array(
+              'nid' => $entity->nid,
+              'reference_nid' => $item['reference_nid'],
+              'event_id' => $item['event_id'],
+              'recipe_id' => $item['recipe_id'],
+              'last_added' => $item['last_added'],
+              'status' => $edit_status,
+            ),
+          )
+        );
+      }
+
+      $element['data'][$cat][$delta] = array('#markup' => $item_rendered);
+    }
+  }
+  else {
+    switch ($display['type']) {
+      /*case 'field_xoxo_shopping_list_item_formatter':
+
+        break;*/
+      case 'field_xoxo_brand' : {
+        if(isset($items[0]['value']) && is_numeric($items[0]['value'])) {
+          $q = "
+            SELECT
+              b.value AS value
+            FROM
+              xoxo_brands b
+            WHERE
+              b.bid = :bid
+            LIMIT 1";
+          $result = db_query($q, array(':bid' => $items[0]['value']))->fetchField();
+          if($result) {
+            $element[0] = array(
+              '#type' => 'html_tag',
+              '#tag' => 'div',
+              '#value' => $result,
+            );
+          }
+        }
+      }
+      break;
+      case 'field_xoxo_manufacturer' : {
+        if(isset($items[0]['value']) && is_numeric($items[0]['value'])) {
+          $q = "
+            SELECT
+              m.value AS value
+            FROM
+              xoxo_manufacturers m
+            WHERE
+              m.mid = :mid
+            LIMIT 1";
+          $result = db_query($q, array(':mid' => $items[0]['value']))->fetchField();
+          if($result) {
+            $element[0] = array(
+              '#type' => 'html_tag',
+              '#tag' => 'div',
+              '#value' => $result,
+            );
+          }
+        }
+      }
+      break;
+      case 'field_xoxo_name' : {
+        if(isset($items[0]['value']) && is_numeric($items[0]['value'])) {
+          $name = _xoxo_fields_component_name_by_id($items[0]['value']);
+          if($name) {
+            $element[0] = array(
+              '#type' => 'html_tag',
+              '#tag' => 'div',
+              '#value' => $name,
+            );
+          }
+        }
+      }
+      break;
+    }
+  }
+
+  return $element;
+}
+function _xoxo_fields_week_status($timestamp) {
+  if(time() > $timestamp + 604800) {
+    return FALSE;
+  }
+  return TRUE;
+}
+
+function _xoxo_fields_calculate_last_added_timestamp($item_nid, $timestamp, $event_id, $recipe_id, $uid = NULL) {
+  if(is_null($uid)) {
+    global $user;
+    $uid = $user->uid;
+  }
+
+  $query = "
+    SELECT
+      f.".XOXO_SHL_ITEMS_FIELD."_last_added AS last_added,
+      f.".XOXO_SHL_ITEMS_FIELD."_event_id AS event_nid,
+      f.".XOXO_SHL_ITEMS_FIELD."_recipe_id AS recipe_nid
+    FROM
+      field_data_".XOXO_SHL_ITEMS_FIELD." f
+    LEFT JOIN
+      {node} n ON n.nid = f.entity_id
+    WHERE
+       f.".XOXO_SHL_ITEMS_FIELD."_reference_nid = :item_nid
+      AND
+       n.uid = :uid
+      AND
+       f.".XOXO_SHL_ITEMS_FIELD."_last_added < :timestamp
+    ORDER BY
+      f.".XOXO_SHL_ITEMS_FIELD."_last_added
+    DESC
+    LIMIT 1
+  ";
+
+  $result = db_query(
+    $query,
+    array(
+      ':item_nid' => $item_nid,
+      ':uid' => $uid,
+      ':timestamp' => $timestamp,
+    )
+  )->fetchAssoc();
+
+  if(!empty($result)) {
+    $result['last_added'] = format_date($result['last_added'], 'custom', 'j/n/Y');
+    return $result['last_added'];
+  }
+
+  return t('New');
+}
+
+function _xoxo_fields_get_ref_nids($value) {
+  return $value['reference_nid'];
+}
+
+function _xoxo_fields_get_ref_uids($value) {
+  return $value['user_uid'];
+}
+
+function _xoxo_fields_get_uom_tids($value) {
+  return $value['uom'];
+}
+
+function _xoxo_fields_titles_by_nids($nids) {
+  if(empty($nids)) {
+    return FALSE;
+  }
+
+  $nids = implode(',', $nids);
+
+  $result = db_query("
+    SELECT
+      f.entity_id AS nid,
+      names.value AS title
+    FROM
+      {field_data_".XOXO_FIELDS_COMPONENT_NAME_FIELD."} f
+    LEFT JOIN
+      ".XOXO_NAMES." names ON names.aid = f.".XOXO_FIELDS_COMPONENT_NAME_FIELD."_value
+    WHERE
+      f.entity_id IN ({$nids})")
+  ->fetchAllKeyed();
+
+  return $result;
+}
+
+function _xoxo_fields_nodetitles_by_nids($nids) {
+  if(empty($nids)) {
+    return FALSE;
+  }
+
+  $nids = implode(',', $nids);
+
+  $result = db_query("
+    SELECT
+      n.nid AS nid,
+      n.title AS title
+    FROM
+      {node} n
+    WHERE
+      n.nid IN ({$nids})")
+  ->fetchAllKeyed();
+
+  return $result;
+}
+
+function _xoxo_fields_brandnames_by_nids($nids) {
+  if(empty($nids)) {
+    return FALSE;
+  }
+
+  $nids = implode(',', $nids);
+  $result = db_query("
+    SELECT
+      n.nid AS nid,
+      b.value AS bname
+    FROM
+      {node} n
+    LEFT JOIN
+      {field_data_".XOXO_COMPONENT_BRAND_FIELD."} f ON n.nid = f.entity_id
+    LEFT JOIN
+      {".XOXO_BRANDS."} b ON b.bid = f.".XOXO_COMPONENT_BRAND_FIELD."_value
+    WHERE
+      n.nid IN ({$nids})")
+  ->fetchAllKeyed();
+
+  return $result;
+}
+
+function _xoxo_fields_descriptions_by_nids($nids) {
+  if(empty($nids)) {
+    return FALSE;
+  }
+
+  $nids = implode(',', $nids);
+  $result = db_query("
+    SELECT
+      f.entity_id AS nid,
+      f.field_component_description_value AS descr
+    FROM
+      {field_data_field_component_description} f
+    WHERE
+      f.entity_id IN ({$nids})")
+  ->fetchAllKeyed();
+
+  return $result;
+}
+
+
+function _xoxo_fields_brandname_by_bid($bid) {
+  if(!$bid) {
+    return FALSE;
+  }
+  $result = db_query("
+    SELECT
+      b.value AS bname
+    FROM
+      {".XOXO_BRANDS."} b
+    WHERE
+      b.bid = {$bid}
+    LIMIT 1")
+  ->fetchField();
+
+  return $result;
+}
+
+function _xoxo_fields_tids_by_nids($nids, $type = 0, $cat_id = 0, $sl = FALSE) {
+  if(empty($nids)) {
+    return array();
+  }
+  $stat = array_count_values($nids);
+  switch($type) {
+    case 0: {
+      $a = XOXO_COMPONENT_CAT_3_TID_FIELD . '_tid';
+      $nids1 = $nids;
+      $nids = implode(',', $nids);
+      $q1 = db_select('field_data_' . XOXO_COMPONENT_CAT_3_TID_FIELD, 't');
+      $q1->addField('t', 'entity_id', 'nid');
+      $q1->addField('t', XOXO_COMPONENT_CAT_3_TID_FIELD . '_tid', 'tid');
+      $q1->leftJoin('taxonomy_term_data', 'tx', 'tx.tid = t.' . $a);
+      $q1->addField('tx', 'name', 'name');
+      $q1->condition('t.entity_id', $nids1, 'IN');
+      if ($sl) {
+        $par = array(':sl' => $sl);
+        $q1->leftJoin('xoxo_groups_drag_drop', 'alt', 'alt.tid = t.' . $a . ' AND alt.nid = :sl', $par);
+        $q1->orderBy('CASE WHEN alt.weight IS NULL THEN tx.weight ELSE alt.weight END');
+      }
+      else {
+        $q1->orderBy('tx.weight');
+      }
+      $q1->orderBy('tx.name');
+      $r = $q1->execute();
+      $result = $r->fetchAllAssoc('nid', PDO::FETCH_ASSOC);
+/*      $q = db_query("
+        SELECT
+          t.entity_id AS nid,
+          t." . XOXO_COMPONENT_CAT_3_TID_FIELD . "_tid AS tid,
+          CASE WHEN alt.weight IS NULL THEN tx.weight ELSE alt.weight END AS merged,
+          tx.name AS name
+        FROM
+          {field_data_" . XOXO_COMPONENT_CAT_3_TID_FIELD . "} t
+        LEFT JOIN
+          {taxonomy_term_data} tx ON tx.tid = t." . XOXO_COMPONENT_CAT_3_TID_FIELD . "_tid
+        LEFT JOIN
+          {xoxo_groups_drag_drop} AS alt ON alt.tid = t." . XOXO_COMPONENT_CAT_3_TID_FIELD . "_tid
+        WHERE
+          t.entity_id IN ({$nids})
+        ORDER BY
+          merged ASC,
+          tx.name ASC");
+      $data = $q->fetchAll();
+      $result = array();
+      foreach($data as $obj) {
+        $result[$obj->nid] = array(
+          'tid' => $obj->tid,
+          'name' => $obj->name
+        );
+      }*/
+      return $result;
+    } break;
+    // help to determine new category
+    case 1: {
+      $nids = implode(',', $nids);
+      $q = db_query("
+        SELECT
+          t.entity_id AS nid,
+          t." . XOXO_COMPONENT_CAT_3_TID_FIELD . "_tid AS tid,
+          tx.name AS name
+        FROM
+          {field_data_" . XOXO_COMPONENT_CAT_3_TID_FIELD . "} t
+        LEFT JOIN
+          {taxonomy_term_data} tx ON  tx.tid = t." . XOXO_COMPONENT_CAT_3_TID_FIELD . "_tid
+        WHERE
+          t.entity_id IN ({$nids}) AND tx.tid = {$cat_id}
+        ORDER BY
+          tx.weight ASC,
+          tx.name ASC");
+      $data = $q->fetchAll();
+
+      $result = array();
+      foreach($data as $obj) {
+        if(!isset($result[$obj->tid])) {
+          $result[$obj->tid] = array(
+            'name' => $obj->name,
+            'nids' => array(),
+          );
+        }
+        else {
+        //  $result[$obj->tid]['nids'][] = $obj->nid;
+        }
+        $i = 0;
+        while($i < $stat[$obj->nid]) {
+          $result[$obj->tid]['nids'][] = $obj->nid;
+          $i++;
+        }
+      }
+      return $result;
+    } break;
+  }
+}
+
+function _xoxo_fields_names_by_uids($uids) {
+  if(empty($uids)) {
+    return FALSE;
+  }
+
+  $uids = implode(',', $uids);
+  $result = db_query("
+    SELECT
+      u.uid AS uid,
+      u.name AS name
+    FROM
+      {users} u
+    WHERE
+      u.uid IN ({$uids})")
+  ->fetchAllKeyed();
+
+  return $result;
+}
+
+function _xoxo_fields_terms_by_vid($vid) {
+  $terms = taxonomy_get_tree($vid);
+  $result = array();
+  foreach($terms as $term) {
+    $result[$term->tid] = $term->name;
+  }
+
+  return $result;
+}
+
+/**
+ * Implements hook_field_widget_info().
+ */
+function xoxo_fields_field_widget_info() {
+  return array(
+    'field_xoxo_shopping_list_item_widget' => array(
+      'label' => t('Items'),
+      'field types' => array('field_xoxo_shopping_list_item'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_widget_form().
+ */
+function xoxo_fields_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  global $user;
+
+  // load uom terms
+  $uoms = array(0 => ' ');
+  if(isset($field['settings']['uom_voc'])) {
+    $uom = taxonomy_get_tree($field['settings']['uom_voc']);
+    foreach($uom as $k => $term) {
+      $uoms[$term->tid] = $term->name;
+    }
+  }
+
+  switch ($instance['widget']['type']) {
+    case 'field_xoxo_shopping_list_item_widget': {
+      $element += array(
+        '#type' => 'fieldset',
+        '#tree' => TRUE,
+      );
+      /*
+       *     case 'node_reference_autocomplete':
+      $element += array(
+        '#type' => 'textfield',
+        '#default_value' => isset($items[$delta]['nid']) ? $items[$delta]['nid'] : NULL,
+        '#autocomplete_path' => $instance['widget']['settings']['autocomplete_path'] . '/' . $instance['entity_type'] . '/' . $instance['bundle'] . '/' . $field['field_name'],
+        '#size' => $instance['widget']['settings']['size'],
+        '#element_validate' => array('node_reference_autocomplete_validate'),
+        '#value_callback' => 'node_reference_autocomplete_value',
+      );
+      break;
+       */
+      $element['reference_nid'] = array(
+        '#title' => 'Reference',
+        '#type' => 'textfield',
+        '#default_value' => isset($items[$delta]['reference_nid']) ? $items[$delta]['reference_nid'] : 0,
+      );
+      $element['qty'] = array(
+        '#title' => 'Quantity',
+        '#type' => 'textfield',
+        '#default_value' => isset($items[$delta]['qty']) ? $items[$delta]['qty'] : 1,
+      );
+      $element['uom'] = array(
+        '#title' => 'Units',
+        '#type' => 'select',
+        '#options' => $uoms,
+        '#default_value' => isset($items[$delta]['uom']) ? $items[$delta]['uom'] : 0,
+      );
+      $element['last_added'] = array(
+        '#title' => 'Last added',
+        '#type' => 'textfield',
+        '#default_value' => isset($items[$delta]['last_added']) ? $items[$delta]['last_added'] : 0,
+      );
+      $element['user_uid'] = array(
+        '#title' => 'User',
+        '#type' => 'textfield',
+        '#default_value' => isset($items[$delta]['user_uid']) ? $items[$delta]['user_uid'] : $user->uid,
+      );
+      $element['status'] = array(
+        '#title' => t('Purchased'),
+        '#type' => 'checkbox',
+        '#default_value' => isset($items[$delta]['status']) ? $items[$delta]['status'] : 0,
+      );
+      $element['event_id'] = array(
+        '#title' => 'Event nid',
+        '#type' => 'textfield',
+        '#default_value' => isset($items[$delta]['event_id']) ? $items[$delta]['event_id'] : 0,
+      );
+      $element['recipe_id'] = array(
+        '#title' => 'Recipe nid',
+        '#type' => 'textfield',
+        '#default_value' => isset($items[$delta]['recipe_id']) ? $items[$delta]['recipe_id'] : 0,
+      );
+    } break;
+  }
+
+  return $element;
+}
+
+/**
+ * Implements hook_field_settings_form().
+ */
+function xoxo_fields_field_settings_form($field, $instance, $has_data) {
+  $settings = $field['settings'];
+
+  $form = array();
+  $vocs = taxonomy_get_vocabularies();
+  $vocabularies = array();
+  foreach($vocs as $vid => $vocabulary) {
+    $vocabularies[$vid] = $vocabulary->name;
+  }
+
+  $form['referenceable_types'] = array(
+    '#type' => 'checkboxes',
+    '#title' => t('Content types that can be referenced'),
+    '#multiple' => TRUE,
+    '#default_value' => $settings['referenceable_types'],
+    '#options' => array_map('check_plain', node_type_get_names()),
+  );
+  $form['uom_voc'] = array(
+    '#type' => 'select',
+    '#title' => t('UOM vocabulary'),
+    '#default_value' => $settings['uom_voc'],
+    '#options' => $vocabularies,
+  );
+
+  return $form;
+}
+
+function _xoxo_fields_get_shopping_list_by_date_author($timestamp, $uid = NULL) {
+  if(is_null($uid)) {
+    global $user;
+    $uid = $user->uid;
+  }
+
+  $result = db_query("
+    SELECT
+      n.nid AS nid
+    FROM
+      {node} n
+    LEFT JOIN
+      {field_data_".XOXO_FIELDS_DATE."_date} d ON d.entity_id = n.nid
+    WHERE
+        n.uid = :uid
+      AND
+        d.".XOXO_FIELDS_DATE."_date_value <= :date
+      AND
+        d.".XOXO_FIELDS_DATE."_date_value + 604800 > :date
+    ORDER BY
+      d.".XOXO_FIELDS_DATE."_date_value DESC
+    LIMIT 1",
+    array(
+      ':uid' => $uid,
+      ':date' => $timestamp
+    )
+  )
+  ->fetchField();
+
+  return $result;
+}
+
+function _xoxo_fields_component_name_by_id($aid) {
+  $name = db_query("
+    SELECT
+      n.value AS name
+    FROM
+      {xoxo_names} n
+    WHERE
+      n.aid = :aid
+    LIMIT 1",
+    array(
+      ':aid' => (int)$aid,
+    )
+  )
+  ->fetchField();
+  return $name;
+}
+
+function _xoxo_fields_get_item_title($node) {
+  if($node->type == 'recipe') {
+    return $node->title;
+  }
+  elseif($node->type == 'component') {
+    if(isset($node->field_component_name[$node->language][0]['value'])) {
+      return _xoxo_fields_component_name_by_id($node->field_component_name[$node->language][0]['value']);
+    }
+
+    return 'Unknown';
+  }
+  else {
+    return 'unknown content type "'.$node->type.'"';
+  }
+}
+
+/*
+ * Recipe block of links ie "Print, Add to category, Edit ..."
+ */
+function _xoxo_fields_recipe_links_block() {
+  global $user;
+  if(arg(0) != 'node' || !is_numeric(arg(1))) {
+    return '';
+  }
+
+  $node = node_load(arg(1));
+  if($node->type != XOXO_FIELDS_TYPE_RECIPE) {
+    return '';
+  }
+
+  if(empty($node->field_recipe_status[LANGUAGE_NONE][0]['value']) && $user->uid != $node->uid) {
+    return '';
+  }
+
+  $content = '';
+  $links = array();
+  $links[] = array(
+    'content' => print_insert_link(),
+    'id' => 'recipe-print',
+  );
+
+  if(user_access('add_to_category')) {
+    $links[] = array(
+      'content' => theme(
+        'views_drag_drop_operations',
+        array(
+          'content' => t('Add to category'),
+          'preset' => 'calendar',
+          'delta' => 5,
+          'args' => array(
+            'nid' => arg(1),
+          ),
+        )
+      ),
+      'id' => 'recipe-add-to-category',
+    );
+  }
+
+  // Add to calendar widget
+  if(user_access('add_to_calendar')) {
+    $links[] = array(
+      'title' => t('Add to calendar'),
+      'path' => '',
+      'id' => 'recipe-add-to-calendar',
+    );
+  }
+
+  if(user_access('clone_recipe')) {
+    $op = ($user->uid == $node->uid) ? 'edit' : 'clone';
+    $links[] = array(
+      'title' => t('Edit'),
+      'path' => 'node/'.arg(1).'/'.$op,
+      'id' => 'recipe-edit',
+    );
+  }
+
+  foreach($links as $k => $link) {
+    if(isset($link['content'])) {
+      $link_content = $link['content'];
+    }
+    else {
+      $link_content = l($link['title'], $link['path']);
+    }
+    $content .= '<div id="'.$link['id'].'" class="recipe-actions">'.$link_content.'</div>';
+  }
+
+  return $content;
+}
+
+function _xoxo_fields_recipe_count($vid) {
+  global $user;
+  $terms = db_query("
+    SELECT
+      tid,
+      name,
+      (SELECT
+        COUNT(*)
+       FROM
+        {taxonomy_index} ti
+       LEFT JOIN
+        {node} n ON ti.nid = n.nid
+       LEFT JOIN
+        {field_data_field_recipe_status} f ON f.entity_id = n.nid
+       WHERE
+        (f.field_recipe_status_value = 1
+          OR
+         n.uid = :uid
+        )
+          AND
+        ti.tid = td.tid
+          AND
+        n.type = 'recipe'
+          AND
+        n.status = 1
+       ) AS node_count
+    FROM
+      {taxonomy_term_data} td
+    WHERE
+      vid = :vid
+    ORDER BY
+      weight
+    ",
+    array(
+      ':vid' => $vid,
+      ':uid' => $user->uid
+    )
+  );
+
+  $items = array();
+  foreach ($terms as $term) {
+    if($term->node_count) {
+      $items[] = l($term->name, 'recipes/filter/' . $term->tid) . ' (' . $term->node_count . ')';
+    }
+    else {
+      $items[] = '<div class="empty-category">'.$term->name.' ('.$term->node_count.')</div>';
+    }
+  }
+  return $items;
+}
+function _xoxo_fields_browsing_filters() {
+  $content = '';
+
+  $items = _xoxo_fields_recipe_count(14);
+  $content .= '<div class="bf_t">'.t('By Diet:').'</div>';
+  $content .= theme('item_list', array('items' => $items));
+
+  $items = _xoxo_fields_recipe_count(11);
+  $content .= '<div class="bf_t">'.t('By Courses:').'</div>';
+  $content .= theme('item_list', array('items' => $items));
+
+  $items = _xoxo_fields_recipe_count(12);
+  $content .= '<div class="bf_t">'.t('By Cuisine:').'</div>';
+  $content .= theme('item_list', array('items' => $items));
+
+  return $content;
+}
+
+function xoxo_fields_tokens_alter(&$replacements, $context) {
+  if($context['type'] == 'user' && isset($replacements['[user:name]'], $context['data']['user']->field_user_name[LANGUAGE_NONE][0]['family']) ) {
+    $replacements['[user:name]'] = $context['data']['user']->field_user_name[LANGUAGE_NONE][0]['given'].' '.$context['data']['user']->field_user_name[LANGUAGE_NONE][0]['family'];
+  }
+}
+
+/*
+ * implementation of hook_node_insert
+ */
+function xoxo_fields_node_insert($node) {
+  if($node->type == 'recipe') {
+    $flag = flag_get_flag('added_to_my_kitchen');
+    $flag->flag('flag', $node->nid);
+  }
+}
+
+/*
+ * Search API modification (limitation to specified content type)
+ */
+/*
+function xoxo_fields_form_search_api_admin_index_status_form_alter(&$form, &$form_state) {
+  $index = $form_state['index'];
+  if (!empty($index->options['data_alter_callbacks']['search_api_alter_bundle_filter']['settings']['bundles'])) {
+
+    $form['filter'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Filter search items'),
+      '#collapsible' => TRUE,
+      );
+
+    $form['filter']['message'] = array(
+      '#type' => 'item',
+      '#markup' => t('By default, excluded bundles are still loaded and explicitly deleted from the search server during indexing. They can be marked as index automatically, but keep in mind that this will not remove them from the server if they already were indexed.'),
+    );
+
+    $form['filter']['mark_indexed'] = array(
+      '#type' => 'submit',
+      '#value' => t('Mark search items of filtered bundles as indexed'),
+      '#submit' => array('_xoxo_fields_mark_indexed'),
+    );
+  }
+}
+*/
+/**
+ * Form submit callback to mark rejected items as indexed.
+ */
+function _xoxo_fields_mark_indexed($form, &$form_state) {
+  $index = $form_state['index'];
+  $settings = $index->options['data_alter_callbacks']['search_api_alter_bundle_filter']['settings'];
+
+  /*kpr($index);
+  kpr($settings);
+  kpr($form_state);
+  */
+
+ // $entity_info = entity_get_info($index->entity_type);
+  $entity_info = entity_get_info($index->item_type);
+
+
+  /*kpr($entity_info);
+  exit;*/
+
+
+  $operator = $settings['default'] ? 'IN' : 'NOT IN';
+  $mark = db_select($entity_info['base table'], 't')
+    ->fields('t', array($entity_info['entity keys']['id']))
+    ->condition($entity_info['entity keys']['bundle'], $settings['bundles'], $operator);
+
+
+  db_update('search_api_item')
+    ->fields(array(
+      'changed' => 0,
+    ))
+    ->condition('index_id', $index->id)
+    ->condition('item_id', $mark, 'IN')
+    ->execute();
+}
+
+
+/*
+ * implementation of hook_views_api
+ */
+function xoxo_fields_views_api() {
+  return array(
+    'api' => 3,
+    'path' => drupal_get_path('module', 'xoxo_fields') . '/include',
+  );
+}
+
+/*
+ * Implementation of hook_node_update
+ */
+function xoxo_fields_node_update($node) {
+  if(module_exists('search_api')) {
+    if($node->type == 'recipe') {
+      // recipe has private status if $node->field_recipe_status[LANGUAGE_NONE][0]['value'] is empty
+      // update status value in indexed table
+      $q = "
+        UPDATE
+          search_api_db_default_fuzzysearch_index_field_recipe_status si
+        SET
+          si.value = :status
+        WHERE
+          si.item_id = :nid
+        LIMIT 1";
+      db_query(
+        $q,
+        array(
+          ':status' => (int) !empty($node->field_recipe_status[LANGUAGE_NONE][0]['value']),
+          ':nid' => $node->nid,
+        )
+      );
+    }
+  }
+}
+
+/*
+ * Implementations of hook_user_cancel_methods_alter
+ */
+function xoxo_fields_user_cancel_methods_alter(&$methods) {
+  $block_user = array_shift($methods);
+  $methods = array($block_user);
+  $methods['user_cancel_xoxo_remove'] = array(
+      'title' => t('Delete user. (A user’s private recipes, shopping lists and meal planning calendars, favorite recipes, favorite prepared meals and photos will be deleted)'),
+      'description' => t('user will be deleted. A user’s private recipes, shopping lists and meal planning calendars, favorite recipes, favorite prepared meals and photos will be deleted.')
+  );
+}
+
+/*
+ * Implementation of hook_user_cancel
+ */
+function xoxo_fields_user_cancel($edit, $account, $method) {
+  if($method != 'user_cancel_xoxo_remove') {
+    return;
+  }
+
+  // clear all consumer's (rid=5) data:
+  //  1. private recipes that is not shated, update author of all public recipes
+  //  2. shoping lists
+  //  3. events, day descriptions
+  //  4. private messages
+  //  5. comments
+  //  6. galleries/images
+  //  7. flags, favorites etc
+  // 
+  // already implemented: #1(without "is not shared" condition"), #2, #3
+  if(isset($account->roles[5])) {
+    $nids_to_delete = array();
+
+    // #1
+    $q = "
+      SELECT
+        n.nid AS nid
+      FROM
+        node n
+      JOIN
+        field_revision_field_recipe_status f ON f.entity_id = n.nid
+      WHERE
+        n.uid = :uid
+          AND
+        n.type = 'recipe'
+          AND
+        f.field_recipe_status_value = 0";
+    $nids1 = db_query($q, array(':uid' => $account->uid))->fetchAll();
+    foreach($nids1 as $k => $obj) {
+      $nids_to_delete[] = $obj->nid;
+    }
+
+    // #2
+    $q = "
+      SELECT
+        n.nid AS nid
+      FROM
+        node n
+      WHERE
+        n.uid = :uid
+          AND
+        n.type = 'shopping_list'";
+    $nids2 = db_query($q, array(':uid' => $account->uid))->fetchAll();
+    foreach($nids2 as $k => $obj) {
+      $nids_to_delete[] = $obj->nid;
+    }
+
+    // #3
+    // events
+    $q = "
+      SELECT
+        n.nid AS nid
+      FROM
+        node n
+      WHERE
+        n.uid = :uid
+          AND
+        n.type = 'event'";
+    $nids3 = db_query($q, array(':uid' => $account->uid))->fetchAll();
+    foreach($nids3 as $k => $obj) {
+      $nids_to_delete[] = $obj->nid;
+    }
+    // day descriptions
+    $q = "
+      SELECT
+        n.nid AS nid
+      FROM
+        node n
+      WHERE
+        n.uid = :uid
+          AND
+        n.type = 'day_description'";
+    $nids4 = db_query($q, array(':uid' => $account->uid))->fetchAll();
+    foreach($nids4 as $k => $obj) {
+      $nids_to_delete[] = $obj->nid;
+    }
+    
+    // #7
+    db_delete('flag_content')
+    ->condition('uid', $account->uid)
+    ->execute();
+    
+    db_delete('xoxo_fields_taxonomy')
+    ->condition('uid', $account->uid)
+    ->execute();
+    
+    // delete nodes
+    node_delete_multiple($nids_to_delete);
+    
+    // update author id
+    db_update('node')
+    ->fields(array(
+      'uid' => 1,
+      'created' => time(),
+      'changed' => time(),
+    ))
+    ->condition('uid', $account->uid)
+    ->execute();
+  
+    db_update('node_revision')
+    ->fields(array(
+      'uid' => 1,
+      'timestamp' => time(),
+    ))
+    ->condition('uid', $account->uid)
+    ->execute();
+
+    // delete user
+    user_delete($account->uid);
+    drupal_set_message(t('User :name has been deleted successfully.', array(':name' => $account->name)));
+    drupal_goto('admin/people/people');
+  }
+}
+
+function xoxo_fields_entity_info_alter(&$entity_info) {
+  $a = array(
+    'htmlmail_view' => 'Mail',
+    'print_view' => 'Print',
+    'in_brand_page' => 'On a Brand Page',
+    'on_fridge' => 'On a Fridge',
+    'icon' => 'Icon',
+    'staple_in_ks' => 'Staple On a Kitchen Setup Page',
+    'pm_in_ks' => 'Prepared Meal On a Kitchen Setup Page',
+  );
+  $m = array_fill_keys(array_keys($a), array('custom settings' => TRUE));
+  foreach ($a as $k => $l) {
+    $m[$k]['label'] = t($l);
+  }
+  $entity_info['node']['view modes'] = $entity_info['node']['view modes'] + $m;
+}
+
+/*
+ * setup code for views php sort field:
+ *      $tids = _xoxo_fields_custom_term_sort_setup();
+ */
+function _xoxo_fields_custom_term_sort_setup() {
+  static $result = array();
+  
+  if(!empty($result)) {
+    return $result;
+  }
+  
+  $cats = db_select('taxonomy_term_data', 't')
+  ->fields('t', array('tid'))
+   ->fields('t', array('weight'))
+  ->condition('t.vid', 11, '=')
+  ->execute()
+  ->fetchAll();
+  $result = array();
+  foreach($cats as $val) {
+    $result[$val->tid] = $val->weight;
+  }
+  return $result;
+}
+
+function _xoxo_fields_tid($nid, $uid = FALSE, $vid = FALSE) {
+  $node = node_load($nid);
+  if (empty($node)) {
+    return FALSE;
+  }
+  if (!$vid) {
+    $vid = _xoxo_kitchen_vid($node);
+  }
+  if ($uid) {
+    $q = db_select('xoxo_fields_taxonomy', 't');
+    $q->addField('t', 'tid');
+    $q->condition('t.nid', $nid)->condition('t.uid', $uid);
+    $q->join('taxonomy_term_data', 'terms', 't.tid=terms.tid');
+    $q->condition('terms.vid', $vid);
+    $tid = $q->range(0, 1)->execute()->fetchField();
+    if (!empty($tid)) {
+      return $tid;
+    }
+  }
+  module_load_include('inc', 'xoxo_week', 'xoxo_week');
+  if ($node->type == XOXO_FIELDS_TYPE_RECIPE) {
+    $f = XOXO_FIELDS_MEAL_TYPE;
+  }
+  else if ($node->type == XOXO_FIELDS_TYPE_COMPONENT) {
+    $pm = $vid == 11 && _xoxo_first_field_value($node, XOXO_FIELDS_PREP_MEAL);
+    $st = $vid == 20 && _xoxo_first_field_value($node, XOXO_FIELDS_KIT_SET);
+    $f = $pm ? XOXO_FIELDS_MEAL_TYPE_C : ($st ? XOXO_FIELDS_STAPLE_CAT : FALSE);
+  }
+  return isset($f) ? _xoxo_first_field_value($node, $f, 'tid') : FALSE;
+}
+/*
+ * sort code for views php sort field: 
+ *     $tid1 = _xoxo_fields_custom_term_sort($row1->nid);
+ *     $tid2= _xoxo_fields_custom_term_sort($row2->nid);
+ *     return $tids[$tid1] <= $tids[$tid2];
+ */
+function _xoxo_fields_custom_term_sort($nid, $recipe = FALSE) {
+  global $user;
+  
+  $tid = db_select('xoxo_fields_taxonomy', 't')
+  ->fields('t', array('tid'))
+  ->condition('t.nid', $nid, '=')
+  ->condition('t.uid', $user->uid, '=')
+  ->execute()
+  ->fetchField();
+  
+  if (empty($tid)) {
+    $n = node_load($nid);
+    $field = field_get_items('node', $n, 'field_recipe_meal_type');
+    $tid = isset($field[0]['tid']) ? $field[0]['tid'] : 0;
+  }
+  
+  return $tid;
+}
+
+function _xoxo_fields_custom_term_sort_perform($nid1, $nid2, $recipe = FALSE) {
+  $tids = _xoxo_fields_custom_term_sort_setup(); 
+  $tid1 = _xoxo_fields_custom_term_sort($nid1, $recipe);
+  $tid2= _xoxo_fields_custom_term_sort($nid2, $recipe);
+
+  if(!isset($tids[$tid1]) || !isset($tids[$tid2])) {
+    return 0;
+  }
+
+  return $tids[$tid1] >= $tids[$tid2];
+}
+function xoxo_fields_field_access($op, $field, $entity_type, $entity, $account) {
+  $n = 'field_component_ks';
+  $s = 'field_recipe_status';
+  $a = 3;//Administrator role ID.
+  $e = 6;//Editor role ID.
+  $rs = $account->roles;
+  if ($n == $field['field_name'] && !array_key_exists($a, $rs)) {
+    return FALSE;
+  }
+  if ($s == $field['field_name'] && _xoxo_recipe_status($entity) == 1 && arg(2) != 'clone') {
+    return FALSE;
+  }
+  return TRUE;
+}
+function xoxo_fields_element_info_alter(&$type) {
+  $type['managed_file']['#pre_render'][] = '_xoxo_fields_image';
+}
+function _xoxo_fields_image($element) {
+  $element['upload'] = array_merge(
+    $element['upload'],
+    array(
+      '#suffix' => '<div class="fake-input"><div class="button">Browse</div></div>',
+      '#size' => 1
+    )
+  );
+  return $element;
+}

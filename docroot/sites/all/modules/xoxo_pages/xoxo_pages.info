@@ -1,0 +1,8 @@
+name = XOXO Pages
+description = Kitchen specific modifications.
+core = 7.x
+package = Warecorp
+scripts[] = xoxo_pages.js
+scripts[] = refresh_view.js
+scripts[] = jquery.blockUI.js
+configure = admin/config/system/xoxo-pages

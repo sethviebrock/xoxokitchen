@@ -1,0 +1,14 @@
+<?php
+
+function theming_form_form_alter(&$form, $form_state, $form_id)  {
+  switch ($form_id)  {
+  case 'recipe_node_form':
+  $form['title'] = array (
+
+	'#name' => 'Title',
+	'#type' => 'textfield',
+	'#size' => '60',
+  );
+  break;
+  }
+  }

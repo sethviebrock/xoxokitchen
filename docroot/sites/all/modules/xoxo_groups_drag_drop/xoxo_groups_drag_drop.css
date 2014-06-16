@@ -1,0 +1,9 @@
+.between-groups {
+	height: 1em;
+	line-height: 1em;
+	background: #99cc33;
+	margin-bottom: 1em;
+}
+.item-category a{
+	cursor: move;
+}

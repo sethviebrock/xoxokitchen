@@ -1,0 +1,172 @@
+
+body {
+  margin: 0 10em;
+  background-color: #fff;
+  font-family: sans-serif;
+}
+th {
+  text-align: left; /* LTR */
+  color: #006;
+  border-bottom: 1px solid #ccc;
+}
+tr.odd {
+  background-color: #ddd;
+}
+tr.even {
+  background-color: #fff;
+}
+td {
+  padding: 5px;
+}
+#menu {
+  visibility: hidden;
+}
+#main {
+  margin: 1em;
+}
+a:link {color: #000;}
+a:visited {color: #000;}
+a:hover {color: #00f;}
+a:link img, a:visited img {border: 0;}
+.print-footnote {font-size: xx-small;}
+img.print-logo {border: 0;}
+.print-site_name {}
+.print-breadcrumb {font-size: x-small;}
+.print-title {}
+.print-submitted {font-size: small;}
+.print-created {font-size: small;}
+.print-taxonomy {
+  text-align: right;
+}
+.print-taxonomy li {display: inline;}
+.print-content {}
+.print-hr {
+  border: 0;
+  height: 1px;
+  width: 100%;
+  color: #9E9E9E;
+  background-color: #9E9E9E;
+}
+.print-message {
+  border: medium dotted blue;
+  padding: 1em;
+}
+.print-source_url {font-size: small;}
+.print-links {font-size: small;}
+.print-footer {text-align: center;}
+
+
+
+/*---------------------------*/
+.print-logo{
+  margin-bottom:70px;
+}
+.print-logo .print-logo{
+  margin-bottom:0;
+}
+.print-content .two_column{
+	clear: both;
+	overflow: hidden;
+	width:900px;
+}
+
+.print-content .two_column .column_left {
+	width: 27%;
+	float:left;
+	margin-right: 20%;
+}
+.print-content .two_column .column_right {
+	width: 53%;
+	float:left;
+}
+.print-content .two_column h2 {
+    color: #99CC33;
+    font: 35px/35px Helvetica,Arial,sans-serif;
+    font-weight:bold;
+    letter-spacing: 0.02em;
+    margin: 0 0 70px;
+}
+.print-content .two_column h4{
+	font: bold 1.2em Arial, Helvetica, sans-serif;
+	color: #603813;
+	margin: 0;  
+}
+.print-content .two_column .info_line {
+	/*margin-bottom: 0;*/
+}
+.print-content .two_column .info_line.red_line{
+	color:#99CC33;
+	margin-bottom: 50px;
+}
+.print-content .two_column .info_line.red_line ol {
+	margin:0;
+  padding-left:20px;
+}
+.print-content .two_column .info_line.red_line h4{
+	color:#99CC33;
+}
+.print-content .two_column .info_line.red_line span {
+	margin: 0 5px;
+}
+.print-content .two_column .info_line.red_line span:first-child {
+	margin-left: 0;
+}
+.print-content .two_column .info_line .ing_line {
+	margin-bottom: 5px;
+  font-weight:bold;
+}
+.print-content .two_column .info_line.photo .field-label{
+	display: none;
+}
+.print-content .two_column span.recipe_info_line {
+	display:block;
+	-moz-border-radius: 4px;
+	-webkit-border-radius: 4px;
+	border-radius: 4px;
+	color:#603813;
+	font: normal 1.1em Arial, Helvetica, sans-serif;
+	padding: 0 5px 6px 0;
+	margin-bottom: 13px;
+  overflow:hidden;
+}
+.print-content .two_column .preparation_text,
+.print-content .two_column .preparation_text p{
+	margin-bottom:10px;
+	font: normal 16px/16px Arial,Helvetica,sans-serif;
+	word-wrap: break-word;
+  color:#603813;
+}
+.print-title{
+    color: #603813;
+    font: 45px/45px Helvetica,Arial,sans-serif;
+    font-weight:bold;
+    letter-spacing: 0.02em;
+    margin: 0;
+    margin-bottom:10px;
+}
+.mdd_area {
+  margin-bottom:38px;
+}
+ .photo{
+  margin-bottom:40px;
+}
+.print-content .two_column .column_left .diet .recipe_info_line{
+  margin:0;
+  padding:0;
+}
+.print-content .two_column a{
+  color:#603813;
+}
+.admin-menu .print-links , 
+.admin-menu .print-footnote{
+  display:none;
+}
+.print-content ul{
+  padding-left:20px;
+}
+
+.sh_pr_title{
+  font:bold 18px/18px Helvetica,Arial,sans-serif;
+  color:#603813;
+}
+

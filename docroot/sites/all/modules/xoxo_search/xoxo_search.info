@@ -1,0 +1,8 @@
+name = XOXO Search
+core = 7.x
+package = Warecorp
+configure = admin/config/system/xoxo-search
+files[] = xoxo_search.description.inc
+files[] = xoxo_search.form.inc
+files[] = xoxo_search.backspace.js
+scripts[] = xoxo_search.js

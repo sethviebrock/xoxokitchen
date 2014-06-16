@@ -1,0 +1,7 @@
+name = XOXO Ingredients Field
+description = Field type designed for ingredient in a recipe.
+core = 7.x
+files[] = xoxo_ingredients_field.module
+files[] = xoxo_ingredients_field.install
+package = Warecorp
+dependencies[] = node_reference

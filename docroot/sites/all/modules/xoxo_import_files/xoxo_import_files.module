@@ -1,0 +1,54 @@
+<?php
+function xoxo_import_files_menu() {
+  $items['admin/config/development/xoxo-import-files'] = array(
+    'title' => t('XOXO Import Files'),
+    'description' => 'XOXO manufacturers files',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('_xoxo_import_files_form_settings'),
+    'access arguments' => array('administer_xoxo_import'),
+    'file' => 'xoxo_import_files.admin.inc',
+  );
+  $items['manufacturers/files'] = array(
+    'title' => 'File download', 
+    'page callback' => 'file_download', 
+    'page arguments' => array('manufacturers'), 
+    'access callback' => TRUE, 
+    'type' => MENU_CALLBACK,
+  );
+    return $items;
+}
+
+function xoxo_import_files_stream_wrappers() {
+    $wrapper = array();
+    if (variable_get('xoxo_import_files_import_path', FALSE)) {
+        $wrapper['manufacturers'] = array(
+          'name' => t('Manufacturers files'), 
+          'class' => 'DrupalXoxoImportFilesStreamWrapper', 
+          'description' => t('Private manufacturers local files'), 
+          'type' => STREAM_WRAPPERS_LOCAL_NORMAL,
+        );
+    }
+    return $wrapper;
+}
+
+function xoxo_import_files_file_download($uri) {
+  if (file_uri_scheme($uri) == 'manufacturers') {
+    if (!user_access('administer_xoxo_import')) {
+      return -1;
+    }
+    else {
+      $mime = file_get_mimetype($uri);
+      return array('Content-Type' => $mime);
+    }
+  }
+}
+
+class DrupalXoxoImportFilesStreamWrapper extends DrupalLocalStreamWrapper {
+  public function getDirectoryPath() {
+    return variable_get('xoxo_import_files_import_path', '');
+  }
+  function getExternalUrl() {
+    $path = str_replace('\\', '/', $this->getTarget());
+    return url('manufacturers/files/' . $path, array('absolute' => TRUE));
+  }
+}

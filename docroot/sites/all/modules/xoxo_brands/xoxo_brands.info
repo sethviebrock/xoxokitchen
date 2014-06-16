@@ -1,0 +1,4 @@
+name = XOXO Brands
+description = Plural brand representation and handling.
+core = 7.x
+package = Warecorp

@@ -1,0 +1,4 @@
+name = XOXO Recipes
+description = Handle plurality of recipes. Filtering and representation, mass actions and other.
+core = 7.x
+package = Warecorp

@@ -1,0 +1,142 @@
+<?php
+/**
+ * @file
+ * Code for the xoxo_recipe feature.
+ */
+
+include_once('xoxo_recipe.features.inc');
+$p = drupal_get_path('module', 'xoxo_recipe') . '/';
+require_once $p . 'constants.inc';
+//Drupal.
+function xoxo_recipe_field_extra_fields() {
+  $fields = array(
+    'title' => 'Title',
+    'added_to_my_kitchen' => 'Added To My Kitchen',
+    'view' => 'View',
+    'by' => 'By',
+    'author_pic' => 'Pic',
+    'favorite' => 'Favorite',
+    'fridge' => 'Fridge',
+    'calendar' => 'Calendar',
+    'favorites' => 'Favorites',
+    'fridges' => 'Fridges'
+  );
+  foreach ($fields as $name => $label) {
+    $a['node']['recipe']['display'][$name] = array(
+      'label' => $label,
+      'weight' => -1
+    );
+  }
+  return $a;
+}
+//Node.
+function xoxo_recipe_node_view($node, $view_mode, $langcode) {
+  list($a, $b, $c, $d, $e, $f, $g, $i) = $classes = array('added_to_my_kitchen', 'title', 'view', 'by', 'author_pic', 'favorite', 'fridge', 'calendar');
+  if (($view_mode == 'in_brand_page' || $view_mode == 'on_fridge') && $node->type == 'recipe') {
+    $account = user_load($node->uid);
+    $div = array('#type' => 'html_tag', '#tag' => 'div');
+    foreach (array($a, $f, $g) as $key) {
+      $node->content[$key] = $div;
+      $node->content[$key]['#value'] = flag_create_link($key, $node->nid);
+    }
+    foreach (array($f, $g) as $name) {
+      $count = flag_get_flag($name)->get_count($node->nid);
+      $names = $name . 's';
+      $node->content[$names] = $div;
+      $node->content[$names]['#value'] = $count;
+      $node->content[$names]['#attributes']['class'][] = $names;
+    }
+    $node->content[$b] = $div + array('#value' => $node->title);
+    $node->content[$c] = array(
+      '#type' => 'link',
+      '#title' => t(XOXO_RECIPE_VIEW_LINK),
+      '#href' => 'node/' . $node->nid,
+    );
+    $node->content[$d] = $div + array('#value' => format_username($account));
+    $node->content[$e] = array(
+      '#theme' => 'image_formatter',
+      '#item' => current((array) field_get_items('user', $account, 'field_user_photo')),
+      '#image_style' => 'tiny_photo'
+    );
+    $node->content[$i] = array(
+      '#type' => 'cal_link',
+      '#nid' => $node->nid,
+      '#href' => 'kitchen',
+      '#title' => t(XOXO_COMPONENT_CAL),
+    );
+    foreach($classes as $class) {
+      $node->content[$class]['#attributes']['class'][] = $class;
+    }
+  }
+}
+function _xoxo_recipe_status($recipe, $val = FALSE) {
+  $f = 'field_recipe_status';
+  $t = 'node';
+  $k = 'value';
+  $m = 'xoxo_week';
+  if ($val === FALSE) {
+    module_load_include('inc', $m, $m);
+    return _xoxo_first_field_value($recipe, $f);
+  }
+}
+//Form.
+function xoxo_recipe_field_group_pre_render_alter(&$element) {
+  if ($element['#id'] == 'node_recipe_on_fridge_group_recipe_actions') {
+    $element['#prefix'] = '<div class="bubble-tail"></div>' . $element['#prefix'];
+    $p = drupal_get_path('module', 'xoxo_component') . '/';
+    $element['#attached']['js'][] = $p . 'xoxo_component.js';
+    $element['#attached']['css'][] = $p . 'xoxo_component.css';
+  }
+}
+function xoxo_recipe_form_recipe_node_form_alter(&$form, &$form_state) {
+  $t1 = 'Create A Recipe';
+  $t2 = 'Edit A Recipe';
+  $t4 = 'Cuisine Type <span class="not-required">(optional)</span>:';
+  $t5 = 'Side Dish <span class="not-required">(optional)</span>:';
+  $t = ctype_digit(arg(1)) ? $t2 : $t1;
+  drupal_set_title(t($t));
+  if (empty($form['field_recipe_cuisine'][LANGUAGE_NONE]['#required'])) {
+    $form['field_recipe_cuisine'][LANGUAGE_NONE]['#title'] = t($t4);
+  }
+  if (empty($form['field_recipe_side_dish'][LANGUAGE_NONE]['#required'])) {
+    $form['field_recipe_side_dish'][LANGUAGE_NONE][0]['value']['#title'] = t($t5);
+//    $form['field_recipe_side_dish'][LANGUAGE_NONE][0]['#title'] = t($t5);
+//    $form['field_recipe_side_dish'][LANGUAGE_NONE]['#title'] = t($t5);
+  }
+  hide($form['actions']['preview']);
+  $form['actions']['submit']['#value'] = t('Complete');
+  $form['field_recipe_servings'][LANGUAGE_NONE]['0']['value']['#size'] = 8;
+  $form['field_recipe_quantity'][LANGUAGE_NONE]['0']['value']['#size'] = 8;
+  $form['field_recipe_time'][LANGUAGE_NONE]['0']['value']['#size'] = 8;
+  $form['field_recipe_image'][LANGUAGE_NONE]['0']['#description'] = '';
+  $form['body'][LANGUAGE_NONE]['0']['value']['#resizable'] = FALSE;
+  $form['body'][LANGUAGE_NONE]['0']['value']['#cols'] = 85;
+  $form['body'][LANGUAGE_NONE]['0']['#rows'] = 10;
+  $form['body'][LANGUAGE_NONE]['0']['#attributes']['placeholder'] = 'Start Here...';
+  foreach ($form['field_recipe_ingredients'][LANGUAGE_NONE] as $delta => $item) {
+    if(is_numeric($delta)) {
+      $form['field_recipe_ingredients'][LANGUAGE_NONE][$delta]['nid']['#title'] = 'Ingredient '.($delta + 1).':';
+      $form['field_recipe_ingredients'][LANGUAGE_NONE][$delta]['nid']['#description'] = t('Example:Peanut Butter');
+      $form['field_recipe_ingredients'][LANGUAGE_NONE][$delta]['nid']['#attributes']['placeholder'] = 'Type ingredient';
+      $form['field_recipe_ingredients'][LANGUAGE_NONE][$delta]['amount']['#title_display'] = 'invisible';
+//      $form['field_recipe_ingredients'][LANGUAGE_NONE][$delta]['amount']['#description'] = t('Example:How Much');
+//      $form['field_recipe_ingredients'][LANGUAGE_NONE][$delta]['amount']['#attributes']['placeholder'] = '1/4';
+      $form['field_recipe_ingredients'][LANGUAGE_NONE][$delta]['unit']['#title_display'] = 'invisible';
+    }
+  }
+  $form['field_recipe_ingredients'][LANGUAGE_NONE]['0']['unit']['#title_display'] = 'invisible';
+  $form['field_recipe_ingredients'][LANGUAGE_NONE]['add_more']['#value']= t('Add Another Ingredient');
+}
+function xoxo_recipe_preprocess_page (&$form) {
+  $t = 'Your Recipe';
+  $i = menu_get_item();
+  $add = $i['path'] == 'node/add/recipe';
+  $edit = $i['path'] == 'node/%/edit' && $i['page_arguments'][0]->type == 'recipe';
+  if ($add || $edit) {
+    $form['title_suffix']['recipe'] = array(
+      '#type' => 'html_tag',
+      '#tag' => 'h2',
+      '#value' => t($t)
+    );
+  }
+}

@@ -1,0 +1,29 @@
+<?php
+/**
+ * @file
+ * Install, update, and uninstall functions for the xoxo_fields module.
+ */
+
+/**
+ * Implements hook_field_schema().
+ */
+function xoxo_fields_field_schema($field) {
+  $columns = array(
+    'reference_nid' => array('type' => 'int', 'length' => 8, 'not null' => TRUE),
+    'qty' => array('type' => 'float', 'length' => 11, 'default' => 1, 'not null' => TRUE),
+    'uom' => array('type' => 'int', 'length' => 3, 'not null' => TRUE),
+    'last_added' => array('type' => 'varchar', 'length' => 11, 'not null' => TRUE),
+    'user_uid' => array('type' => 'int', 'length' => 7, 'not null' => TRUE),
+    'status' => array('type' => 'int', 'length' => 2, 'default' => 1, 'not null' => TRUE),
+    'event_id' => array('type' => 'int', 'length' => 8, 'not null' => TRUE, 'default' => 0),
+    'recipe_id' => array('type' => 'int', 'length' => 8, 'not null' => TRUE, 'default' => 0),
+  );
+  $indexes = array(
+    'reference_nid' => array('reference_nid'),
+    'user_uid' => array('user_uid'),
+  );
+  return array(
+    'columns' => $columns,
+    'indexes' => $indexes,
+  );
+}

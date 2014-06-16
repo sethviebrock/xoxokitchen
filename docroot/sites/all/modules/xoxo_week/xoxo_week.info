@@ -1,0 +1,13 @@
+name = XOXO Week
+description = Views Week style plugin.
+core = 7.x
+package = Warecorp
+files[] = xoxo_week.module
+files[] = xoxo_week.inc
+files[] = xoxo_week.js
+files[] = xoxo_week.views.inc
+files[] = xoxo_week_view_week.tpl.php
+files[] = xoxo_week_plugin_style_week.inc
+dependencies[] = views
+dependencies[] = date
+php = 5.2

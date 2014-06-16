@@ -1,0 +1,1683 @@
+<?php
+// info: views_drag_drop.module, v1.2 2012/2/22 Segei Churilo
+
+/**
+ * Implementation of hook_init
+ */
+function views_drag_drop_init() {
+  if(arg(0) == 'kitchen-setup') {
+    _views_drag_drop_init_dragdrop('generic');
+  }
+}
+
+/**
+ * Implementation of hook_permission
+ */
+function views_drag_drop_permission() {
+  $permissions = array(
+    'access_drag_and_drop' => array(
+      'title' => t('Access drag and drop'),
+    ),
+    'administer_drag_and_drop' => array(
+      'title' => t('Administer drag and drop'),
+    ),
+  );
+
+  $presets = _views_drag_drop_settings();
+  foreach($presets as $preset => $temp) {
+    $permissions['access_op_'.$preset.'_create_node'] = array(
+      'title' => t(
+        'Create node for <em>@preset</em> preset',
+        array(
+          '@preset' => $temp['#title']
+        )
+      )
+    );
+    $permissions['access_op_'.$preset.'_edit_node'] = array(
+      'title' => t(
+        'Edit node for <em>@preset</em> preset',
+        array(
+          '@preset' => $temp['#title']
+        )
+      )
+    );
+    $permissions['access_op_'.$preset.'_delete_node'] = array(
+      'title' => t(
+        'Delete node for <em>@preset</em> preset',
+        array(
+          '@preset' => $temp['#title']
+        )
+      )
+    );
+    $permissions['access_op_'.$preset.'_delete_item'] = array(
+      'title' => t(
+        'Delete field item for <em>@preset</em> preset',
+        array(
+          '@preset' => $temp['#title']
+        )
+      )
+    );
+  }
+
+  // invoke hook_views_drag_drop_assign_actions
+  $actions = array();
+  foreach(module_implements('views_drag_drop_assign_actions') as $module) {
+    call_user_func($module.'_views_drag_drop_assign_actions', &$actions, NULL);
+  };
+
+  foreach($actions as $action => $config) {
+    foreach($presets as $preset => $temp) {
+      if(!isset($config['preset'])) {
+        $permissions['access_op_generic_'.$action] = array(
+          'title' => t(
+            'Access to additional operation <em>@op</em>',
+            array(
+              '@op' => (isset($config['title'])) ? $config['title'] : $action,
+            )
+          )
+        );
+      }
+      elseif($config['preset'] == $preset || $config['preset'] == '@internal@') {
+        $permissions['access_op_'.$preset.'_'.$action] = array(
+          'title' => t(
+            'Access to additional operation <em>@op</em> for <em>@preset</em> preset',
+            array(
+              '@op' => (isset($config['title'])) ? $config['title'] : $action,
+              '@preset' => $temp['#title']
+            )
+          )
+        );
+      }
+    }
+  }
+
+  return $permissions;
+}
+
+/*
+ * Implementation of hook_views_drag_drop_assign_actions
+ */
+function views_drag_drop_views_drag_drop_assign_actions(&$config, $args) {
+  $config['delete_item'] = array(
+    'title' => 'Delete field item',
+    'content' => t('Delete item'),
+    'preset' => '@internal@',
+    'status' => 1,
+    'weight' => 0,
+    'remove_container' => TRUE,
+    'remove_additional_options' => FALSE,
+    'remove_current_link' => FALSE,
+  );
+}
+
+/*
+ * Implementation hook_views_drag_drop_perform_actions
+ */
+function views_drag_drop_views_drag_drop_perform_actions($action, &$output, &$new_action, $preset, &$args, &$options) {
+  if($action == 'delete_item') {
+    // perform delete field item operations
+    $settings = _views_drag_drop_settings($preset);
+    $node_autodelete = (!empty($settings['#options']['#disable_drop_conditions']['#node_autodelete'])) ? TRUE : FALSE;
+    $node = NULL;
+    return _views_drag_drop_delete_item($args['@delete_op'], $settings, $preset, $args, $node_autodelete);
+  }
+}
+
+function views_drag_drop_menu() {
+  $items = array();
+
+  $items['ajax/drag-and-drop'] = array(
+    'page callback' => '_views_drag_drop_ajax_callback',
+    'access arguments' => array('access_drag_and_drop'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['admin/config/development/views-drag-drop'] = array(
+    'title' => t('Views Drag and Drop'),
+    'description' => 'Settings for Views Drag and Drop',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('_views_drag_drop_callback_admin_settings'),
+    'access arguments' => array('administer_drag_and_drop'),
+  );
+
+  return $items;
+}
+
+/**
+ * Implement hook_theme().
+ */
+function views_drag_drop_theme($existing, $type, $theme, $path) {
+  return array(
+    'views_draggable_unformatted' => array(
+      'variables' => array('view' => NULL, 'settings' => array(), 'attributes' => array()),
+      'template' => 'theme/views_draggable_unformatted',
+    ),
+    'views_droppable_unformatted' => array(
+      'variables' => array('view' => NULL, 'settings' => array(), 'attributes' => array()),
+      'template' => 'theme/views_droppable_unformatted',
+    ),
+    'views_drag_drop_draggable' => array(
+      'variables' => array('preset' => NULL, 'args' => array(), 'content' => '', 'status' => TRUE, 'vibrant' => FALSE, 'options' => array(), 'prefix_only' => FALSE),
+    ),
+    'views_drag_drop_droppable' => array(
+      'variables' => array('preset' => NULL, 'args' => array(), 'content' => '', 'status' => TRUE, 'prefix_only' => FALSE),
+    ),
+    'views_drag_drop_operations' => array(
+      'variables' => array('preset' => 'generic', 'delta' => 0, 'args' => array(), 'content' => '', 'prefix_only' => FALSE, 'event' => 'mouseenter'),
+    ),
+  );
+}
+
+function _views_drag_drop_draggable_args($preset) {
+  $settings = _views_drag_drop_settings($preset);
+  return (isset($settings['#drag']['#args'])) ? $settings['#drag']['#args'] : FALSE;
+}
+
+function _views_drag_drop_droppable_args($preset) {
+  $settings = _views_drag_drop_settings($preset);
+  return (isset($settings['#drop']['#args'])) ? $settings['#drop']['#args'] : FALSE;
+}
+
+function theme_views_drag_drop_draggable($variables) {
+  if(user_access('access_drag_and_drop') && _views_drag_drop_init_dragdrop($variables['preset'])) {
+    return _views_drag_drop_theme_element($variables, 'drag', 'draggable');
+  }
+}
+
+function theme_views_drag_drop_droppable($variables) {
+  if(user_access('access_drag_and_drop') && _views_drag_drop_init_dragdrop($variables['preset'])) {
+    return _views_drag_drop_theme_element($variables, 'drop', 'droppable');
+  }
+}
+
+function theme_views_drag_drop_operations($variables) {
+  $preset = (!empty($variables['preset'])) ? $variables['preset'] : 'generic';
+  _views_drag_drop_init_dragdrop($preset);
+  $args = $variables['args'];
+  $content = $variables['content'];
+  $delta = $variables['delta'];
+  $event = $variables['event'];
+  //$status = $variables['status'];
+  $prefix_only = $variables['prefix_only'];
+
+  // add default classes
+  $classes = 'item-operations item-operations-'.$preset;
+
+  $args_safe = array();
+  foreach($args as $key => $value) {
+    if(is_array($value)) {
+      foreach($value as $k2 => $v2) {
+        $args_safe[$key][$k2] = htmlspecialchars($v2);
+      }
+    }
+    elseif(strpos($key, ':') !== FALSE) {
+      list($key1, $key2) = explode(':', $key);
+      $args_safe[$key1][$key2] = htmlspecialchars($value);
+    }
+    else {
+      $args_safe[$key] = htmlspecialchars($value);
+    }
+  }
+
+  $not_static = FALSE;
+  $add_ops = _views_drag_drop_additional_ops($preset, $args, $classes, $not_static, $delta);
+
+  $output = "
+    <div class=\"item-wrapper item-operations-wrapper itevent-{$event}\">
+    <div class=\"{$classes}\"";
+
+  if($not_static) {
+    $args_json = drupal_json_encode($args_safe);
+    $crc = _views_drag_drop_crc_encode($args_json);
+    $output .= " data-drag='{$args_json}' data-crc='{$crc}'";
+  }
+
+  $output .= ">
+    {$content}
+    </div>
+    {$add_ops}";
+
+  if(!$prefix_only) {
+    $output .= "</div>";
+  }
+
+  return $output;
+}
+
+function _views_drag_drop_theme_element($variables, $type, $class_part) {
+  $preset = $variables['preset'];
+  $args = $variables['args'];
+  $content = $variables['content'];
+  $status = $variables['status'];
+  $prefix_only = $variables['prefix_only'];
+  $add_ops = '';
+  $delete_element = '';
+
+  $settings = _views_drag_drop_settings($preset);
+  if(!$settings) {
+    return FALSE;
+  }
+
+  // add default classes
+  $classes = 'item-'.$class_part.' item-'.$class_part.'-'.$preset;
+  $id = '';
+
+  // add special classes
+  if(!empty($settings['#'.$type]['#classes'])) {
+    foreach($settings['#'.$type]['#classes'] as $add_class) {
+      _views_drag_drop_prepare_class($add_class, $args);
+      $classes .= ' '.$add_class;
+    }
+  }
+
+  // add special id
+  if(!empty($settings['#'.$type]['#id'])) {
+    _views_drag_drop_prepare_class($settings['#'.$type]['#id'], $args);
+    $id = $settings['#'.$type]['#id'];
+  }
+
+  // add vibrant class
+  if($type == 'drag' && $variables['vibrant']) {
+    $classes .= ' item-'.$class_part.'-vibrant';
+  }
+
+  // add disabled class
+  if(!$status) {
+    $classes .= ' item-'.$class_part.'-'.$preset.'-disabled';
+  }
+
+  // add special delete args
+  if($type == 'drag' && isset($variables['options']['nid'], $variables['options']['field'], $variables['options']['value'])) {
+    $args['@delete_op'] = array(
+      'nid' => $variables['options']['nid'],
+      $variables['options']['field'] => $variables['options']['value'],
+    );
+  }
+
+  if($status && $type == 'drag') {
+    $not_static = FALSE;
+    $add_ops = _views_drag_drop_additional_ops($preset, $args, $classes, $not_static);
+  }
+
+  $args_safe = array();
+  foreach($args as $key => $value) {
+    if(is_array($value)) {
+      foreach($value as $k2 => $v2) {
+        if(is_array($v2)) {
+          foreach($v2 as $k3 => $v3) {
+            $args_safe[$key][$k2][$k3] = htmlspecialchars($v3);
+          }
+        }
+        else {
+          $args_safe[$key][$k2] = htmlspecialchars($v2);
+        }
+      }
+    }
+    elseif(strpos($key, ':') !== FALSE) {
+      list($key1, $key2) = explode(':', $key);
+      $args_safe[$key1][$key2] = htmlspecialchars($value);
+    }
+    else {
+      $args_safe[$key] = htmlspecialchars($value);
+    }
+  }
+
+  $args_json =  drupal_json_encode($args_safe);
+  $crc = _views_drag_drop_crc_encode($args_json);
+
+  if($id) {
+    $id = 'id="'.$id.'" ';
+  }
+
+  $output = "<div class=\"item-wrapper item-{$class_part}-wrapper\"><div {$id}class=\"{$classes}\" data-{$type}='{$args_json}' data-crc='{$crc}'>{$content}";
+
+  if(!$prefix_only) {
+    $output .= "</div>{$add_ops}</div>";
+  }
+
+  return $output;
+}
+
+function _views_drag_drop_is_internal_preset($preset) {
+  static $presets = array();
+
+  if(empty($presets)) {
+    $presets = _views_drag_drop_settings();
+  }
+
+  return isset($presets[$preset]);
+}
+
+function _views_drag_drop_additional_ops($preset, &$args, &$classes_parent, &$not_static, $delta = 0) {
+  //static $actions = array();
+  $actions = array();
+  $content = '';
+  global $user;
+ // if(!isset($actions[$preset])) {
+    // invoke hook_views_drag_drop_assign_actions
+    $temp_actions = array();
+    foreach(module_implements('views_drag_drop_assign_actions') as $module) {
+      call_user_func($module.'_views_drag_drop_assign_actions', &$temp_actions, $args);
+    };
+
+    foreach($temp_actions as $action => $config) {
+      if(isset($config['preset'])) {
+        if($config['preset'] != $preset && $config['preset'] != '@internal@') {
+          unset($temp_actions[$action]);
+        }
+        elseif ($config['preset'] == '@internal@') {
+          if(!_views_drag_drop_is_internal_preset($preset)) {
+            unset($temp_actions[$action]);
+          }
+        }
+      }
+      elseif($preset != 'generic') {
+        unset($temp_actions[$action]);
+      }
+    }
+    $actions[$preset] = (!empty($temp_actions)) ? $temp_actions : NULL;
+//  }
+
+  if(!isset($actions[$preset]) || is_null($actions[$preset])) {
+    return '';
+  }
+
+  $flag = FALSE;
+  $content_array = array();
+  $not_static = FALSE;
+  foreach($actions[$preset] as $action => $config) {
+    if((user_access('access_op_'.$preset.'_'.$action) || substr($action, 0, 7) == 'addcat_' || substr($action, 0, 4) == 'cat_')
+    && !empty($config['status'])
+    && _views_drag_drop_additional_op_status($config['status'], $preset, $action, $args)
+    && !empty($config['content'])
+    // fix 05172012-001 and 05242012
+    && !($action == 'delete_item' && $user->uid == 1 && $preset == 'shopping_list')
+    ) {
+      $conf_delta = (!empty($config['delta'])) ? $config['delta'] : 0;
+      if($conf_delta == $delta) {
+        $classes = '';
+        if(!empty($config['classes'])) {
+          $classes = ' '.$config['classes'];
+        }
+
+        $w = (isset($config['weight'])) ? $config['weight']*100 : 0 ;
+        while (isset($content_array[$w])) {
+          $w++;
+        }
+
+        // additional options
+        if(!empty($config['options'])) {
+          if(!empty($config['options']['classes'])) {
+            if(!empty($config['options']['classes']['parent'])) {
+              $classes_parent .= ' '.$config['options']['classes']['parent'];
+            }
+          }
+        }
+
+        if(!empty($config['static'])) {
+          $classes .= ' additional-op-static';
+        }
+        else {
+          $not_static = TRUE;
+        }
+
+        $content_array[$w] = '<div id="op-'.$action.'" class="additional-op additional-op-'.$action.' '.$classes.'">'.$config['content'].'</div>';
+        
+        $flag = TRUE;
+      }
+    }
+  }
+  if($flag) {
+    ksort($content_array);
+    $content = '<div class="item-additional-ops"><div class="content-additional-ops">'.implode('', $content_array).'</div></div>';
+  }
+
+  return $content;
+}
+
+function _views_drag_drop_additional_op_status($status, $preset, $action, &$args) {
+  if(is_array($status) && isset($status['callback'])) {
+    return call_user_func($status['callback'], $preset, $action, &$args);
+  }
+  else {
+    return (bool)$status;
+  }
+}
+
+function _views_drag_drop_prepare_class(&$class, $args) {
+  foreach($args as $field => $value) {
+    if(strpos($class, '['.$field.']') !== FALSE) {
+      $class = str_replace('['.$field.']', htmlspecialchars($value), $class);
+    }
+  }
+}
+
+function template_preprocess_views_draggable_unformatted(&$vars) {
+  module_load_include('inc', 'views_drag_drop', 'theme/views_dragdrop.theme');
+  _views_drag_drop_preprocess_views_draggable_unformatted($vars);
+}
+
+function template_preprocess_views_droppable_unformatted(&$vars) {
+  module_load_include('inc', 'views_drag_drop', 'theme/views_dragdrop.theme');
+  _views_drag_drop_preprocess_views_droppable_unformatted($vars);
+}
+
+/**
+ * Implements hook_views_api().
+ */
+function views_drag_drop_views_api() {
+  return array(
+    'api' => 3,
+    'path' => drupal_get_path('module', 'views_drag_drop').'/includes',
+  );
+}
+
+function _views_drag_drop_init_dragdrop($preset) {
+  static $statuses = array();
+
+  if(in_array($preset, $statuses)) {
+    return TRUE;
+  }
+
+  $vdd_settings_json = '{'.variable_get('views_drag_drop_settings', '').'}';
+  //   $vdd_settings_json = str_replace("#", '', '{'.variable_get('views_drag_drop_settings', '').'}');
+  // need to remove fcking # from keys because of we need it translate to js
+  $vdd_settings_array = drupal_json_decode($vdd_settings_json);
+  $vdd_settings_array_prepared = array();
+  foreach($vdd_settings_array as $key1 => $value1) {
+    $k1 = str_replace("#", '', $key1);
+    if(!is_array($vdd_settings_array[$key1])) {
+      $vdd_settings_array_prepared[$k1] = $value1;
+      continue;
+    }
+    foreach($vdd_settings_array[$key1] as $key2 => $value2) {
+      $k2 = str_replace("#", '', $key2);
+      if(!is_array($vdd_settings_array[$key1][$key2])) {
+        $vdd_settings_array_prepared[$k1][$k2] = $value2;
+        continue;
+      }
+      foreach($vdd_settings_array[$key1][$key2] as $key3 => $value3) {
+        $k3 = str_replace("#", '', $key3);
+        if(!is_array($vdd_settings_array[$key1][$key2][$key3])) {
+          $vdd_settings_array_prepared[$k1][$k2][$k3] = $value3;
+          continue;
+        }
+        foreach($vdd_settings_array[$key1][$key2][$key3] as $key4 => $value4) {
+          $k4 = str_replace("#", '', $key4);
+          $vdd_settings_array_prepared[$k1][$k2][$k3][$k4] = $value4;
+        }
+      }
+    }
+  }
+
+  if(!isset($vdd_settings_array_prepared[$preset])) {
+    $vdd_settings_array_prepared[$preset] = array('options' => array('reusable_draggable_items' => 0));
+    //    return FALSE;
+  }
+
+  $settings_array = array();
+  // invoke hook_views_drag_drop_assign_actions
+  static $actions2 = array();
+  if(empty($actions2)) {
+    $actions = array();
+    $actions2 = array();
+    foreach(module_implements('views_drag_drop_assign_actions') as $module) {
+      call_user_func($module.'_views_drag_drop_assign_actions', &$actions, NULL);
+    };
+    foreach($actions as $action => $config) {
+      // need to test this behaviour
+      $p = (isset($config['preset'])) ? $config['preset'] : 'generic';
+      if($p == '@internal@') {
+        $p = $preset;
+      }
+      if(user_access('access_op_'.$p.'_'.$action) || substr($action, 0, 7) == 'addcat_' || substr($action, 0, 4) == 'cat_') {
+        $actions2['op-'.$action] = $action;
+      }
+   /*   if(user_access('access_op_'.$preset.'_'.$action)
+      && (!isset($config['preset']) || $config['preset'] == $preset || ($config['preset'] == '@internal@' && _views_drag_drop_is_internal_preset($preset)))) {
+        $actions2['op-'.$action] = $action;
+      }*/
+    }
+    $settings_array['actions'] = $actions2;
+  }
+  
+  drupal_add_library('system', 'ui.draggable');
+  drupal_add_library('system', 'ui.droppable');
+  drupal_add_library('system', 'effects.blind');
+  drupal_add_js(drupal_get_path('module', 'views_drag_drop') .'/js/views_drag_drop.js', 'file');
+  
+  if($preset == 'generic') {
+    $settings_array = $settings_array + $vdd_settings_array_prepared[$preset];
+   /* drupal_add_js(
+      array(
+        'views_drag_drop' => array('actions' => $actions2)+$vdd_settings_array_prepared[$preset]
+      ),
+      'setting'
+    );*/
+  }
+  else {
+    $settings_array = $settings_array + $vdd_settings_array_prepared[$preset] + array('preset' => $preset);
+  /*  drupal_add_js(
+      array(
+        'views_drag_drop' => array('preset' => $preset)+array('actions' => $actions2)+$vdd_settings_array_prepared[$preset]
+      ),
+      'setting'
+    );*/
+  }
+
+  drupal_add_js(
+      array(
+        'views_drag_drop' => $settings_array,
+      ),
+      'setting'
+    );
+  
+  drupal_add_css(drupal_get_path('module', 'views_drag_drop') . '/css/views_drag_drop.css');
+  $statuses[] = $preset;
+
+  return TRUE;
+}
+
+function _views_drag_drop_settings($preset = NULL) {
+  $settings_json = '{'.variable_get('views_drag_drop_settings', '').'}';
+  $settings = drupal_json_decode($settings_json);
+  return (!is_null($preset) && isset($settings[$preset])) ? $settings[$preset] : $settings;
+}
+
+function _views_drag_drop_ajax_callback($ajax = TRUE, $args = array()) {
+  $args = ($ajax) ? $_POST : $args;
+  global $user;
+  if(!$ajax || (!isset($args['op'])
+      && isset($args['drag_raw'], $args['drag_crc'], $args['drop_raw'], $args['drop_crc'])
+      && _views_drag_drop_crc_check($args['drag_raw'], $args['drag_crc'])
+      && _views_drag_drop_crc_check($args['drop_raw'], $args['drop_crc'])
+      )
+  ) {
+    if($ajax) {
+      $drag_arg = drupal_json_decode($args['drag_raw']);
+      $drop_arg = drupal_json_decode($args['drop_raw']);
+
+      // html decode drag args
+      foreach($drag_arg as $k => &$v) {
+        if($k == '@delete_op') {
+          continue;
+        }
+
+        if(is_array($v)) {
+          foreach($v as $k1 => $v1) {
+            $v[$k1] = htmlspecialchars_decode($v1);
+          }
+        }
+        else {
+          $v = htmlspecialchars_decode($v);
+        }
+      }
+
+      // html decode drop args
+      foreach($drop_arg as $k => &$v) {
+        if(is_array($v)) {
+          foreach($v as $k1 => $v1) {
+            if(is_array($v1)) {
+              foreach($v1 as $k2 => $v2) {
+                $v[$k1][$k2] = htmlspecialchars_decode($v2);
+              }
+            }
+            else {
+              $v[$k1] = htmlspecialchars_decode($v1);
+            }
+          }
+        }
+        else {
+          $v = htmlspecialchars_decode($v);
+        }
+      }
+    }
+    else {
+      $drag_arg = $args['drag_args'];
+      $drop_arg = $args['drop_args'];
+    }
+
+    // copies of arguments - not working!!! uknown bug about value by reference
+    $dra = $drag_arg;
+    $dpa = $drop_arg;
+
+    $preset = $args['preset'];
+    /*************** perform all node operations ***************/
+    $settings = _views_drag_drop_settings($preset);
+    $status = FALSE;
+    $responce = '';
+    $node = NULL;
+    $op = '';
+    $disable_dpoppable = FALSE;
+    $element = $settings['#output']['#element'];
+
+    $all_args = array_merge_recursive($drag_arg, $drop_arg);
+    // check draggable for delete operation
+    if(!empty($drag_arg['@delete_op'])) {
+      $node_autodelete = (!empty($settings['#options']['#disable_drop_conditions']['#node_autodelete'])) ? TRUE : FALSE;
+      if(user_access('access_op_'.$preset.'_delete_item')) {
+        $status = _views_drag_drop_delete_item($drag_arg['@delete_op'], $settings, $preset, $all_args, $node_autodelete);
+        if($status) {
+          $op = 'delete_item';
+        }
+      }
+    }
+
+    $status = _views_drag_drop_perform_node_operations($settings, $drag_arg, $drop_arg, $preset, $responce, $node, $op, $disable_dpoppable);
+
+    // prepare class/id of target element
+    $target_status = _views_drag_drop_target_element($element, $all_args);
+    $response_array = array(
+      'status' => $status,
+      'has_new_drag_args' => FALSE,
+      'has_new_drop_args' => FALSE,
+      'op' => $op,
+      'dis_dp' => $disable_dpoppable,
+      'element' => ($target_status) ? $element : FALSE,
+      'html' => $responce,
+      'droppable_parent' => FALSE,
+      'custom_trigger_element' => FALSE,
+      'custom_trigger_event' => FALSE,
+      'custom_trigger_condition' => FALSE,
+    );
+
+    if($status) {
+      switch($op) {
+        case 'create' : {
+          if(!empty($settings['#drop']['#replace_args'])) {
+            _views_drag_drop_create_new_drop_args($node, $settings['#drop']['#replace_args'], $drop_arg);
+          }
+          // invoke hook_views_drag_drop_node_presave
+          foreach(module_implements('views_drag_drop_node_presave') as $module) {
+            call_user_func($module.'_views_drag_drop_node_presave', &$node, &$response_array, &$drag_arg, &$drop_arg, $preset, $settings);
+          };
+          node_save($node);
+        } break;
+        case 'edit' : {
+          // invoke hook_views_drag_drop_node_alter
+          foreach(module_implements('views_drag_drop_node_alter') as $module) {
+            call_user_func($module.'_views_drag_drop_node_alter', &$node, &$response_array, &$drag_arg, &$drop_arg, $preset, $settings);
+          };
+          node_save($node);
+        } break;
+        case 'delete' : {
+
+        } break;
+        default : {
+
+        }
+      }
+
+      // prepare container for response
+      if(!empty($settings['#output']['#container'])) {
+        $content = "<{$settings['#output']['#container']['#element']}";
+        if(isset($settings['#output']['#container']['#id'])) {
+          $html_id = $settings['#output']['#container']['#id'];
+          _views_drag_drop_prepare_class($html_id, $all_args);
+          $content .= " id=\"{$html_id}\"";
+        }
+
+        if(isset($settings['#output']['#container']['#html_class'])) {
+          $html_class = $settings['#output']['#container']['#html_class'];
+          _views_drag_drop_prepare_class($html_class, $all_args);
+          $content .= " class=\"{$html_class}\"";
+        }
+        $content .= ">";
+
+        $content .= $response_array['html']."</{$settings['#output']['#container']['#element']}>";
+      }
+      else {
+        $content = $response_array['html'];
+      }
+
+      // create draggable if appropriate option set
+      if(!empty($settings['#options']['#output_as_draggable'])) {
+        if(!empty($settings['#options']['#output_as_draggable']['#exclude'])) {
+          $new_args = _views_drag_drop_exclude_args($drag_arg, $settings['#options']['#output_as_draggable']['#exclude']);
+        }
+        else {
+          $new_args = $drag_arg;
+        }
+        $content = theme(
+          'views_drag_drop_draggable',
+          array(
+            'preset' => $preset,
+            'args' => $new_args,
+            'content' => $content,
+            'status' => TRUE,
+            'vibrant' => TRUE,
+            'options' => array(
+              'nid' => $node->nid,
+              'field' => $settings['#options']['#output_as_draggable']['#field'],
+              'value' => $all_args[$settings['#options']['#output_as_draggable']['#field']],
+            )
+          )
+        );
+      }
+
+      // droppable exceptions
+      if(!empty($settings['#drop']['#exceptions'])) {
+        foreach($settings['#drop']['#exceptions'] as $class_prefix => $token) {
+          _views_drag_drop_prepare_exceptions($node, $drop_arg, $class_prefix, $token);
+        }
+      }
+
+      // compare args for changes, prepare new args if needed
+      _views_drag_drop_prepare_new_args($response_array, $dra, $drag_arg, $dpa, $drop_arg);
+
+      if(isset($args['droppable_parent'], $args['drop_parent_raw'], $args['drop_parent_crc']) && _views_drag_drop_crc_check($args['drop_parent_raw'], $args['drop_parent_crc'])) {
+        $droppable_parent_args = _views_drag_drop_prepare_parent_droppable_args($args['droppable_parent'], $args['drop_parent_raw'], $drag_arg, $settings, $preset);
+        if($droppable_parent_args) {
+           _views_drag_drop_prepare_new_args($drop_parent, array(), array(), array(), $droppable_parent_args);
+           $response_array['droppable_parent'] = $droppable_parent_args;
+        }
+      }
+
+      $response_array['html'] = $content;
+    }
+    /***********************************************************/
+  }
+  elseif(isset($args['op'], $args['drag_raw'], $args['drag_crc']) && _views_drag_drop_crc_check($args['drag_raw'], $args['drag_crc'])) {
+    $preset = (!empty($args['preset'])) ? $args['preset'] : 'generic';
+    $action = $args['op'];
+    $settings = _views_drag_drop_settings($preset);
+
+    if(isset($args['drop_raw'], $args['drop_crc']) && _views_drag_drop_crc_check($args['drop_raw'], $args['drop_crc'])) {
+      $drop_args = drupal_json_decode($args['drop_raw']);
+      $drop_args_copy = $drop_args;
+      $drop_args_copy['#copy'] = TRUE;
+    }
+    else {
+      $drop_args = array();
+      $drop_args_copy = array();
+    }
+
+    $drag_args = drupal_json_decode($args['drag_raw']);
+    $drag_args_copy = $drag_args;
+    $drag_args_copy['#copy'] = TRUE;
+    $output = '';
+    $new_action = FALSE;
+    $options = array(
+      'remove_container' => FALSE,
+      'remove_additional_options' => FALSE,
+      'remove_current_link' => FALSE,
+      'replace_drop_args' => FALSE,
+    );
+    $status = FALSE;
+
+    if(user_access('access_op_'.$preset.'_'.$action) || substr($action, 0, 7) == 'addcat_' || substr($action, 0, 4) == 'cat_') {
+      $actions = array();
+      foreach(module_implements('views_drag_drop_assign_actions') as $module) {
+        call_user_func($module.'_views_drag_drop_assign_actions', &$actions, NULL);
+      };
+      if(isset($actions[$action]['new_action'])) {
+        $new_action = $actions[$action]['new_action'];
+      }
+      else {
+        $new_action = $action;
+      }
+
+      if($new_action) {
+        if(isset($actions[$new_action]['content'])) {
+          $output = $actions[$new_action]['content'];
+        }
+      }
+      // remove container
+      if(!empty($actions[$action]['remove_container'])) {
+        $options['remove_container'] = TRUE;
+      }
+      // remove all additional options
+      if(!empty($actions[$action]['remove_additional_options'])) {
+        $options['remove_additional_options'] = TRUE;
+      }
+      // remove current link
+      if(!empty($actions[$action]['remove_current_link'])) {
+        $options['remove_current_link'] = TRUE;
+      }
+      // custom trigger element
+      if(!empty($actions[$action]['custom_trigger_element'])) {
+        $options['custom_trigger_element'] = $actions[$action]['custom_trigger_element'];
+      }
+      // custom trigger event
+      if(!empty($actions[$action]['custom_trigger_event'])) {
+        $options['custom_trigger_event'] = $actions[$action]['custom_trigger_event'];
+      }
+
+      // invoke hook_views_drag_drop_perform_actions
+      foreach(module_implements('views_drag_drop_perform_actions') as $module) {
+        if(call_user_func($module.'_views_drag_drop_perform_actions', $action, &$output, &$new_action, $preset, &$drag_args, &$options)) {
+          $status = TRUE;
+        }
+      };
+
+      // add option for changing exception for droppable parent
+      if($status && $action == 'delete_item') {
+        if(_views_drag_drop_remove_exception($settings, $preset, $drag_args, $drop_args)) {
+          $options['replace_drop_args'] = TRUE;
+        }
+      }
+
+      _views_drag_drop_prepare_new_args($response_array, $drag_args_copy, $drag_args, $drop_args_copy, $drop_args);
+    }
+
+    if(!$status) {
+      $new_action = FALSE;
+    }
+
+    $response_array = array(
+      'status' => $status,
+      'html' => $output,
+      'has_new_drag_args' => (isset($response_array['has_new_drag_args'])) ? $response_array['has_new_drag_args'] : FALSE,
+      'new_drag_args' => (isset($response_array['new_drag_args'])) ? $response_array['new_drag_args'] : array(),
+      'new_drag_crc' => (isset($response_array['new_drag_crc'])) ? $response_array['new_drag_crc'] : '',
+
+      'has_new_drop_args' => (isset($response_array['has_new_drop_args'])) ? $response_array['has_new_drop_args'] : FALSE,
+      'new_drop_args' => (isset($response_array['new_drop_args'])) ? $response_array['new_drop_args'] : array(),
+      'new_drop_crc' => (isset($response_array['new_drop_crc'])) ? $response_array['new_drop_crc'] : '',
+
+      'new_action' => $new_action,
+      'options' => $options,
+    );
+  }
+  else {
+    watchdog('views_drag_drop', 'Preset @p: Incorrect arguments recieved - CRC doesn\'t match. UID = @uid', array('@p' => $args['preset'], '@uid' => $user->uid), WATCHDOG_WARNING);
+    $response_array = array(
+      'status' => FALSE,
+      'html' => 'Error occured',
+    );
+  }
+
+  if(!$ajax) {
+    return $response_array;
+  }
+
+  return drupal_json_output($response_array);
+  exit;
+}
+
+
+function _views_drag_drop_prepare_parent_droppable_args($droppable_parent_id, $droppable_parent_args_raw, $drag_arg, $settings, $preset) {
+  $droppable_parent_args = drupal_json_decode($droppable_parent_args_raw);
+
+  // remove exceptions from drop args of vibrant's parent
+  $status = _views_drag_drop_remove_exception($settings, $preset, $drag_arg, $droppable_parent_args);
+  if($status) {
+    $droppable_parent_args = drupal_json_encode($droppable_parent_args);
+    return array(
+      'droppable_parent_id' => $droppable_parent_id,
+      'droppable_parent_args_raw' => $droppable_parent_args,
+      'droppable_parent_args_crc' => _views_drag_drop_crc_encode($droppable_parent_args),
+    );
+  }
+
+  return FALSE;
+}
+
+function _views_drag_drop_remove_exception($settings, $preset, $drag_args, &$drop_args) {
+  // remove droppable exceptions
+  if(!empty($settings['#drop']['#exceptions'])) {
+    foreach($settings['#drop']['#exceptions'] as $class_prefix => $token) {
+      if(!isset($drop_args['@exceptions@'][$class_prefix])) {
+        continue;
+      }
+
+      if(substr($token, 0, 1) == '[' && substr($token, -1) == ']') {
+        $field_name = substr($token, 1, strlen($token)-2);
+        if(isset($drag_args[$field_name])) {
+          $key = array_search($drag_args[$field_name], $drop_args['@exceptions@'][$class_prefix]);
+          if($key !== FALSE) {
+            unset($drop_args['@exceptions@'][$class_prefix][$key]);
+            if(empty($drop_args['@exceptions@'][$class_prefix])) {
+              unset($drop_args['@exceptions@'][$class_prefix]);
+            }
+            return TRUE;
+          }
+        }
+      }
+    }
+  }
+
+  return FALSE;
+}
+
+/*
+ * prepare exception arguments for droppable
+ */
+function _views_drag_drop_prepare_exceptions($node, &$drop_arg, $class_prefix, $token) {
+  //_xoxo_debug($node, '$node', 'views_drag_drop');
+  if(substr($token, 0, 1) == '[' && substr($token, -1) == ']') {
+    $field_name = substr($token, 1, strlen($token)-2);
+  }
+  else {
+    return FALSE;
+  }
+
+  if(!isset($node->{$field_name}[$node->language])){
+    return FALSE;
+  }
+
+  $fields_info = field_info_fields();
+  $type = $fields_info[$field_name]['type'];
+
+  switch($type) {
+    case 'node_reference' : {
+      $mid_key = 'nid';
+    } break;
+    case 'user_reference' : {
+      $mid_key = 'uid';
+    } break;
+    case 'taxonomy_term_reference' : {
+      $mid_key = 'tid';
+    } break;
+    default : {
+      $mid_key = 'value';
+    }
+  }
+
+  $exceptions = array();
+  foreach($node->{$field_name}[$node->language] as $field_data) {
+    if(isset($field_data[$mid_key])) {
+      $exceptions[] = $field_data[$mid_key];
+    }
+  }
+
+  if(!empty($exceptions)) {
+    $drop_arg['@exceptions@'][$class_prefix] = $exceptions;
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+function _views_drag_drop_prepare_new_args(&$response_array, $drag_args_copy, $drag_arg, $drop_args_copy, $drop_arg) {
+  $response_array['has_new_drag_args'] = TRUE;
+  foreach($drag_arg as $k => &$v) {
+    if(is_array($v)) {
+      foreach($v as $k1 => $v1) {
+        $drag_arg[$k][$k1] = htmlspecialchars($v1);
+      }
+    }
+    else {
+      $drag_arg[$k] = htmlspecialchars($v);
+    }
+  }
+  $response_array['new_drag_args'] = drupal_json_encode($drag_arg);
+  $response_array['new_drag_crc'] = _views_drag_drop_crc_encode($response_array['new_drag_args']);
+
+  $response_array['has_new_drop_args'] = TRUE;
+  foreach($drop_arg as $k => &$v) {
+    if(is_array($v)) {
+      foreach($v as $k1 => $v1) {
+        if(is_array($v1)) {
+          foreach($v1 as $k2 => $v2) {
+            $drop_arg[$k][$k1][$k2] = htmlspecialchars($v2);
+          }
+        }
+        else {
+          $drop_arg[$k][$k1] = htmlspecialchars($v1);
+        }
+      }
+    }
+    else {
+      $drop_arg[$k] = htmlspecialchars($v);
+    }
+  }
+  $response_array['new_drop_args'] = drupal_json_encode($drop_arg);
+  $response_array['new_drop_crc'] = _views_drag_drop_crc_encode($response_array['new_drop_args']);
+
+  /*if(!empty($drag_args_copy['#copy'])) {
+    unset($drag_args_copy['#copy']);
+    if(count($drag_args_copy) != count($drag_arg) || array_diff_assoc($drag_args_copy, $drag_arg)) {
+      $response_array['has_new_drag_args'] = TRUE;
+      foreach($drag_arg as $k => &$v) {
+        if(is_array($v)) {
+          foreach($v as $k1 => $v1) {
+            $drag_arg[$k][$k1] = htmlspecialchars($v1);
+          }
+        }
+        else {
+          $drag_arg[$k] = htmlspecialchars($v);
+        }
+      }
+      $response_array['new_drag_args'] = drupal_json_encode($drag_arg);
+      $response_array['new_drag_crc'] = _views_drag_drop_crc_encode($response_array['new_drag_args']);
+    }
+  }
+
+  if(!empty($drop_args_copy['#copy'])) {
+
+    _xoxo_debug($drop_args_copy, '$drop_args_copy', 'xoxo_fields');
+    _xoxo_debug($drop_arg, '$drop_arg', 'xoxo_fields');
+    $t = array_diff_assoc($drop_args_copy, $drop_arg+array('#copy' => TRUE));
+    _xoxo_debug($t, '$t', 'xoxo_fields');
+
+    if(count($drop_args_copy)-1 != count($drop_arg) || array_diff_assoc($drop_args_copy, $drop_arg+array('#copy' => TRUE))) {
+      unset($drop_args_copy['#copy']);
+      $response_array['has_new_drop_args'] = TRUE;
+      foreach($drop_arg as $k => &$v) {
+        if(is_array($v)) {
+          foreach($v as $k1 => $v1) {
+            $drop_arg[$k][$k1] = htmlspecialchars($v1);
+          }
+        }
+        else {
+          $drop_arg[$k] = htmlspecialchars($v);
+        }
+      }
+      $response_array['new_drop_args'] = drupal_json_encode($drop_arg);
+      $response_array['new_drop_crc'] = _views_drag_drop_crc_encode($response_array['new_drop_args']);
+    }
+  }*/
+}
+
+function _views_drag_drop_exclude_args($drag_arg, $exclude) {
+  $new_args = $drag_arg;
+  foreach($exclude as $field) {
+    if(isset($new_args[$field])) {
+      unset($new_args[$field]);
+    }
+  }
+  return $new_args;
+}
+
+function _views_drag_drop_delete_item($params, $settings, $preset, $all_args, $node_autodelete = FALSE, $internal = FALSE) {
+  foreach($params as $key => $value) {
+    if($key == 'nid') {
+      $nid = $value;
+    }
+    else {
+      $field_name = $key;
+      $field_value = $value;
+    }
+  }
+
+  if(!isset($nid, $field_name, $field_value)) {
+    return FALSE;
+  }
+
+  $node = node_load($nid);
+  if(!$node) {
+    return FALSE;
+  }
+
+  if(!isset($node->{$field_name}[$node->language])){
+    return FALSE;
+  }
+
+  if(user_access('access_op_'.$preset.'_delete_node') && $node_autodelete && count($node->{$field_name}[$node->language]) == 1) {
+    if(!$internal) {
+      // invoke hook_views_drag_drop_delete_field_item
+      foreach(module_implements('views_drag_drop_delete_field_item') as $module) {
+        call_user_func($module.'_views_drag_drop_delete_field_item', $params, $all_args, $preset, $settings);
+      };
+    }
+
+    node_delete($nid);
+
+    return TRUE;
+  }
+
+  $fields_info = field_info_fields();
+  $type = $fields_info[$field_name]['type'];
+
+  switch($type) {
+    case 'node_reference' : {
+      $mid_key = 'nid';
+    } break;
+    case 'user_reference' : {
+      $mid_key = 'uid';
+    } break;
+    case 'taxonomy_term_reference' : {
+      $mid_key = 'tid';
+    } break;
+    default : {
+      $mid_key = 'value';
+    }
+  }
+
+  $status = _views_drag_drop_item_search_and_remove($node->{$field_name}[$node->language], $mid_key, $field_value);
+  if(!$status) {
+    return FALSE;
+  }
+
+  if(!$internal) {
+    // invoke hook_views_drag_drop_delete_field_item
+    foreach(module_implements('views_drag_drop_delete_field_item') as $module) {
+      call_user_func($module.'_views_drag_drop_delete_field_item', $params, $all_args, $preset, $settings);
+    };
+  }
+
+  node_save($node);
+  return TRUE;
+}
+/*
+ function _views_drag_drop_new_drop_args_before_delete($node, $settings) {
+ foreach($settings['#drop']['#args'] as $label => $field) {
+ if(isset($node->$field)) {
+ $new_drop_args[$field] = htmlspecialchars($node->$field);
+ }
+ }
+ if(empty($new_drop_args)) {
+ return FALSE;
+ }
+
+ $new_drop_args = drupal_json_encode($new_drop_args);
+ $new_drop_crc = _views_drag_drop_crc_encode($new_drop_args);
+ return TRUE;
+
+ }
+ */
+function _views_drag_drop_item_search_and_remove(&$search_array, $mid_key, $needle) {
+  $status = FALSE;
+  foreach($search_array as $key => &$value) {
+    if(!isset($search_array[$key][$mid_key])) {
+      continue;
+    }
+    if(!$status && $search_array[$key][$mid_key] == $needle) {
+      $status = TRUE;
+    }
+    elseif($status) {
+      $search_array[$key-1] = $search_array[$key];
+    }
+  }
+  if($status) {
+    unset($search_array[$key]);
+  }
+
+  return $status;
+}
+
+function _views_drag_drop_target_element(&$element, $args) {
+  $flag = FALSE;
+  foreach($args as $field => $value) {
+    if(strpos($element, '['.$field.']') !== FALSE) {
+      $element = str_replace('['.$field.']', $value, $element);
+      $flag = TRUE;
+    }
+  }
+
+  return $flag;
+}
+
+//function _views_drag_drop_create_new_drop_args($node, $conf, &$new_drop_args, &$new_drop_crc) {
+function _views_drag_drop_create_new_drop_args($node, $conf, &$drop_arg) {
+  foreach($conf as $label => $field) {
+    if(isset($node->$field)) {
+      $drop_arg[$field] = htmlspecialchars($node->$field);
+    }
+  }
+}
+
+function _views_drag_drop_perform_node_operations($settings, $drag_arg, $drop_arg, $preset, &$responce, &$node, &$op, &$disable_dpoppable) {
+  global $user;
+  $args = array_merge_recursive($drag_arg, $drop_arg);
+  if(isset($settings['#output']['#value'])) {
+    $content = _views_drag_drop_prepare_output($args, $settings['#output']['#value']);
+  }
+
+  // check if we can load node
+  if(isset($args['nid'])) {
+    $node = node_load($args['nid']);
+  }
+
+
+  if(empty($node)) {
+    if(isset($args['nid'])) {
+      unset($args['nid']);
+    }
+    if(user_access('access_op_'.$preset.'_create_node')) {//_views_drag_drop_check_user_access($user, $settings['#options']['#operations']['create'])
+      // create node behaviour
+      $node = _views_drag_drop_create_node($args, $settings);
+      if(!empty($node)) {
+        $responce = $content;
+        $op = 'create';
+        return TRUE;
+      }
+      $responce = t('Error. Can\'t create node');
+      return FALSE;
+    }
+    else {
+      watchdog('views_drag_drop', 'Preset @p: access denied for node creation for user @uid.', array('@p' => $preset, '@uid' => (bool)$user->uid), WATCHDOG_WARNING);
+      $responce = '';
+      return FALSE;
+    }
+  }
+  elseif(user_access('access_op_'.$preset.'_edit_node')) {//_views_drag_drop_check_user_access($user, $settings['#options']['#operations']['edit'])
+    // edit node behaviour
+    $node = node_load($args['nid']);
+    $locked = FALSE;
+    if(_views_drag_drop_edit_node($node, $locked, $disable_dpoppable, $args, $settings)) {
+      $responce = ($locked) ? '' : $content;
+      $op = 'edit';
+      return TRUE;
+    }
+    else {
+      $responce = t('Nothing to do');
+      return FALSE;
+    }
+  }
+  elseif(user_access('access_op_'.$preset.'_delete_node')) {
+    // delete node behaviour
+    // not supported currently
+  }
+  elseif(!user_access('access_op_'.$preset.'_edit_node')) {
+    watchdog('views_drag_drop', 'Preset @p: access denied for node edtition for user @uid.', array('@p' => $preset, '@uid' => (bool)$user->uid), WATCHDOG_WARNING);
+    $responce = '';
+    return FALSE;
+  }
+  elseif(user_access('access_op_'.$preset.'_delete_node')) {
+    watchdog('views_drag_drop', 'Preset @p: access denied for node deletion for user @uid.', array('@p' => $preset, '@uid' => (bool)$user->uid), WATCHDOG_WARNING);
+    $responce = '';
+    return FALSE;
+  }
+  else {
+    // nothing to do
+    watchdog('views_drag_drop', 'Preset @p: edit and delete operation not allowed.', array('@p' => $preset), WATCHDOG_WARNING);
+    $responce = t('Sorry... Nothing to do');
+    return FALSE;
+  }
+
+  return FALSE;
+}
+
+function _views_drag_drop_prepare_output($args, $parts) {
+  $content = '';
+  foreach($parts as $part) {
+    if(substr($part, 0, 1) == '[' && substr($part, -1) == ']') {
+      if(isset($args[substr($part, 1, strlen($part)-2)])) {
+        $content .= $args[substr($part, 1, strlen($part)-2)];
+      }
+    }
+    else {
+      $content .= $part;
+    }
+  }
+
+  return $content;
+}
+
+function _views_drag_drop_edit_node(&$node, &$locked, &$disable_dpoppable, $args, $settings) {
+  $fields_info = field_info_fields();
+  $status = FALSE;
+  foreach($args as $field => $value) {
+    if($field == 'nid' || substr($field, 0, 1) == '@') {
+      continue;
+    }
+
+    if(!isset($node->{$field}[$node->language])) {
+      $node->{$field}[$node->language] = array();
+    }
+
+    if(substr($field, 0, 6) == 'field_') {
+      // fill in node fields
+      if($fields_info[$field]['cardinality'] == '-1') {
+        $cardinality = 999;
+      }
+      else {
+        $cardinality = ($fields_info[$field]['cardinality']) ? (int)$fields_info[$field]['cardinality'] : 1;
+      }
+      $i = 0;
+      $wr = FALSE;
+
+      if(isset($settings['#options']['#disable_drop_conditions'][$field])) {
+        if($settings['#options']['#disable_drop_conditions'][$field] == '@max@') {
+          $max_items = $cardinality;
+        }
+        else {
+          $max_items = (int)$settings['#options']['#disable_drop_conditions'][$field];
+        }
+        if(count($node->{$field}[$node->language]) >= $max_items) {
+          $disable_dpoppable = TRUE;
+          $locked = TRUE;
+          break;
+        }
+      }
+
+      while($i < $cardinality) {
+        if(!_views_drag_drop_isset_field($node->{$field}[$node->language], $i, $fields_info[$field]['type'])) {
+          _views_drag_drop_fill_field(
+          $node->{$field}[$node->language][$i],
+          $fields_info[$field]['type'],
+          $value
+          );
+          $wr = TRUE;
+          break;
+        }
+        $i++;
+      }
+      // use agressive mode to overwrite toppest item belonging to field
+      if(isset($settings['#options']['#edit_mode']) && $settings['#options']['#edit_mode'] == 'agressive' && !$wr) {
+        _views_drag_drop_fill_field(
+        $node->{$field}[$node->language][$cardinality-1],
+        $fields_info[$field]['type'],
+        $value
+        );
+      }
+
+      //disable drop condisions
+      _views_drag_drop_check_disable_condision(&$disable_dpoppable, $field, $node->{$field}[$node->language], $settings, $cardinality);
+    }
+    else {
+      // standard node attributes
+      $node->{$field} = htmlspecialchars_decode($value);
+    }
+    $status = TRUE;
+  }
+  // update author of the node is option provided
+  if(!empty($settings['#options']['#update_author'])) {
+    global $user;
+    $node->uid = $user->uid;
+  }
+
+  return $status;
+}
+
+function _views_drag_drop_check_disable_condision(&$disable_dpoppable, $field, $field_source, $settings, $cardinality = 1) {
+  if(!$disable_dpoppable && isset($settings['#options']['#disable_drop_conditions'][$field])) {
+    if($settings['#options']['#disable_drop_conditions'][$field] == '@max@') {
+      $max_items = $cardinality;
+    }
+    else {
+      $max_items = (int)$settings['#options']['#disable_drop_conditions'][$field];
+    }
+
+    if(count($field_source) >= $max_items) {
+      $disable_dpoppable = TRUE;
+    }
+  }
+}
+
+function _views_drag_drop_isset_field($field_source, $i, $type) {
+  if(isset($field_source[$i]) && is_array($field_source[$i]) && count($field_source[$i]) > 1) {
+    // here we determine custom fields which has several values under several keys
+    return TRUE;
+  }
+  switch($type) {
+    case 'node_reference' : {
+      return isset($field_source[$i]['nid']);
+    } break;
+    case 'user_reference' : {
+      return isset($field_source[$i]['uid']);
+    } break;
+    case 'taxonomy_term_reference' : {
+      return isset($field_source[$i]['tid']);
+    } break;
+    default : {
+      return isset($field_source[$i]['value']);
+    }
+  }
+}
+
+function _views_drag_drop_fill_field(&$field_source, $type, $value) {
+  if(is_array($value)) {
+    foreach($value as $k => $v) {
+      $field_source[$k] = htmlspecialchars_decode($v);
+    }
+  }
+  else {
+    $value = htmlspecialchars_decode($value);
+    switch($type) {
+      case 'node_reference' : {
+        $field_source['nid'] = $value;
+      } break;
+      case 'user_reference' : {
+        $field_source['uid'] = $value;
+      } break;
+      case 'taxonomy_term_reference' : {
+        $field_source['tid'] = $value;
+      } break;
+      default : {
+        $field_source['value'] = $value;
+      }
+    }
+  }
+}
+
+function _views_drag_drop_create_node($args, $settings) {
+  global $user;
+  $node = new stdClass();
+  $node->type = $settings['#content_type'];
+
+  // setup title
+  if(isset($args['title'])) {
+    $node->title = $args['title'];
+    unset($args['title']);
+  }
+  elseif(!empty($settings['#options']['#node_title'])) {
+    $node->title =_views_drag_drop_prepare_output($args, $settings['#options']['#node_title']);
+  }
+  else {
+    $node->title = 'created by VDD ('.date('c').')';
+  }
+  // get author uid
+  if(isset($args['uid'])) {
+    $uid = $args['uid'];
+    unset($args['uid']);
+  }
+  // setup status
+  if(isset($args['status'])) {
+    $node->status = $args['status'];
+    unset($args['status']);
+  }
+  // setup promote
+  if(isset($args['promote'])) {
+    $node->promote = $args['promote'];
+    unset($args['promote']);
+  }
+  // setup sticky
+  if(isset($args['sticky'])) {
+    $node->sticky = $args['sticky'];
+    unset($args['sticky']);
+  }
+
+  node_object_prepare($node);
+
+  // setup language
+  if(isset($args['language'])) {
+    $node->language = $args['language'];
+    unset($args['language']);
+  }
+  else {
+    $node->language = LANGUAGE_NONE;
+  }
+
+  // setup body
+  if(isset($args['body'])) {
+    $node->body[$node->language][0]['value'] = htmlspecialchars_decode($args['body']);
+    unset($args['body']);
+    if(isset($args['body_summary'])) {
+      $node->body[$node->language][0]['summary'] = text_summary(htmlspecialchars_decode($args['body_summary']));
+      unset($args['body_summary']);
+    }
+    if(isset($settings['#options']['#body_filter'])) {
+      $node->body[$node->language][0]['format']  = $settings['#options']['#body_filter'];
+    }
+  }
+  else {
+    $node->body[$node->language][0]['value'] = '';
+  }
+
+  // setup alias
+  if(isset($args['alias'])) {
+    $node->path = array('alias' => $args['alias']);
+    unset($args['alias']);
+  }
+
+  // setup fields
+  $fields_info = field_info_fields();
+  foreach($args as $field => $value) {
+    if(substr($field, 0, 1) == '@') {
+      continue;
+    }
+
+    // need to test this behaviour for custom fields
+    if(is_array($value) && !empty($value)) {
+      $field_data = array();
+      foreach($value as $k => $v) {
+        $field_data[$k] = htmlspecialchars_decode($v);
+      }
+      $node->{$field}[$node->language][] = $field_data;
+      continue;
+    }
+
+    $value = htmlspecialchars_decode($value);
+    $ftype = _views_drag_drop_field_type($field, $fields_info);
+    switch($ftype) {
+      case 'taxonomy_term_reference' : {
+        $node->{$field}[$node->language][]['tid'] = $value;
+      } break;
+      case 'node_reference' : {
+        $node->{$field}[$node->language][]['nid'] = $value;
+
+      } break;
+      case 'user_reference' : {
+        $node->{$field}[$node->language][]['uid'] = $value;
+      } break;
+      case 'datetime' : {
+        // date
+        $node->{$field}[$node->language][0]['value'] = $value;
+      } break;
+      case 'date' : {
+        // iso date
+        $node->{$field}[$node->language][0]['value'] = $value;
+      } break;
+      case 'datestamp' : {
+        // timestamp
+        $node->{$field}[$node->language][0]['value'] = $value;
+      } break;
+      /* case 'file type field' : {
+       // Some file on our system
+       $file_path = drupal_realpath('somefile.png'); // Create a File object
+       $file = (object) array(
+       'uid' => 1,
+       'uri' => $file_path,
+       'filemime' => file_get_mimetype($filepath),
+       'status' => 1,
+       );
+       $file = file_copy($file, 'public://'); // Save the file to the root of the files directory. You can specify a subdirectory, for example, 'public://images'
+       $node->field_image[LANGUAGE_NONE][0] = (array)$file; //associate the file object with the image field:
+       } break;*/
+      default : {
+        $node->{$field}[$node->language][0]['value'] = $value;
+      }
+    }
+  }
+
+  // save node
+  if(isset($uid)) {
+    $node->uid = $uid;
+  }
+  $node = node_submit($node);
+  node_save($node);
+
+  return $node;
+}
+
+function _views_drag_drop_field_type($field, $fields) {
+  if(!isset($fields[$field])) {
+    return FALSE;
+  }
+
+  return $fields[$field]['type'];
+}
+
+function _views_drag_drop_check_user_access($user, $roles, $comma_separated = TRUE) {
+  if($comma_separated) {
+    $roles = explode(',', $roles);
+  }
+  foreach($roles as $rid) {
+    if(isset($user->roles[$rid])) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+function _views_drag_drop_callback_admin_settings() {
+  $ctypes = node_type_get_types();
+  $ftypes = field_read_instances(array('entity_type' => 'node'));
+  $content_hierarhy = array();
+  foreach($ftypes as $k => $field) {
+    $content_hierarhy[$field['bundle']][$field['field_name']] = $field['field_name'].' ('.$field['label'].')';
+  }
+  ksort($content_hierarhy);
+  $header = array(t('Content type'), t('Field/Attribute'));
+  $rows = array();
+
+  $rows[] = array(
+    'ctype' => '*',
+    'field' => 'nid (Node id)'
+    );
+    $rows[] = array(
+    'ctype' => '*',
+    'field' => 'uid (Author id. If omitted - current logged in user\'s uid will be used)'
+    );
+    $rows[] = array(
+    'ctype' => '*',
+    'field' => 'title (Title)',
+    );
+    $rows[] = array(
+    'ctype' => '*',
+    'field' => 'body_summary (body summary)',
+    );
+    $rows[] = array(
+    'ctype' => '*',
+    'field' => 'language (language machine name)',
+    );
+    $rows[] = array(
+    'ctype' => '*',
+    'field' => 'status (published/unpublished - 1/0)',
+    );
+    $rows[] = array(
+    'ctype' => '*',
+    'field' => 'sticky (1-yes/0-no)',
+    );
+    $rows[] = array(
+    'ctype' => '*',
+    'field' => 'promote (promote to frontpage: 1-yes/0-no)',
+    );
+    $rows[] = array(
+    'ctype' => '*',
+    'field' => 'alias (Path alias)',
+    );
+    foreach($content_hierarhy as $key => $ctype) {
+      ksort($ctype);
+      foreach($ctype as $key2 => $field) {
+        $rows[] = array(
+        'ctype' => $key.' ('.$ctypes[$key]->name.')',
+        'field' => $field,
+        );
+      }
+    }
+    $table = theme('table', array('header' => $header, 'rows' => $rows));
+
+    $form = array();
+    $form['views_drag_drop_help'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Help'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    );
+    $form['views_drag_drop_help']['views_drag_drop_table'] = array(
+    '#markup' => '<h3>'.t('Available fields/attributes').'</h3>'.$table,
+    );
+
+    $form['views_drag_drop_settings'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Settings'),
+    '#rows' => 30,
+    '#default_value' => variable_get('views_drag_drop_settings', ''),
+    '#description' => 'Use JSON format to set configuration data',
+    '#attributes' => array('style' => array('font-family: courier new;')),
+    );
+
+    return system_settings_form($form);
+}
+
+function _views_drag_drop_crc_check($str, $crc) {
+  return (_views_drag_drop_crc_encode($str) == $crc) ? TRUE : FALSE;
+}
+
+function _views_drag_drop_crc_encode($str) {
+  $hash = md5('hT869kL'.$str);
+  return substr(md5($hash), 26, 1).substr(md5($hash), 13, 1).substr(md5($hash), 18, 1).substr(md5($hash), 2, 1);
+}

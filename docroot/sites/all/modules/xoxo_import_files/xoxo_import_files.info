@@ -1,0 +1,5 @@
+name = XOXO Import Files
+description = Paste files in dir-import of the module "XOXO Import"
+package = Warecorp
+core = 7.x
+version = "7.x-1.x-dev"

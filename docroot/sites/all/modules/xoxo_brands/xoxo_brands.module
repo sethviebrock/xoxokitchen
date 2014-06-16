@@ -1,0 +1,198 @@
+<?php
+//Drupal.
+function xoxo_brands_block_info() {
+  $b1 = 'XOXO Index';
+  $b2 = 'Favorite Brands';
+  return array(
+    'xoxo_index' => array('info' => t($b1)),
+    'xoxo_favorite_brands' => array('info' => t($b2))
+  );
+}
+function xoxo_brands_menu() {
+  return array(
+    'xoxo-brands' => array(
+      'title' => 'XOXO Brands',
+      'page callback' => '_xoxo_brands_array',
+      'access arguments' => array('access content'),
+      'delivery callback' => 'drupal_json_output',
+      'type' => MENU_CALLBACK
+    )
+  );
+}
+function _xoxo_brands_index() {
+  $span = array('#type' => 'html_tag', '#tag' => 'span');
+  $content = array(
+    'prefix' => $span + array(
+      '#attributes' => array('class' => array('index-prefix')),
+      '#value' => t(variable_get('xoxo_brands_xoxo_index_prefix', 'Alphabetical brand index'))
+    )
+  );
+  $sep = array(
+    '#type' => 'html_tag',
+    '#tag' => 'span',
+    '#attributes' => array('class' => array('separator')),
+    '#value' => variable_get('xoxo_brands_xoxo_index_separator', ' ')
+  );
+  foreach (array_merge(array('fav', 'dig'), range('A', 'Z')) as $let) {
+    $ls[$let] = _xoxo_brands_letter($let);
+    $ls[$let . 'sep'] = $sep;
+  }
+  array_pop($ls);
+  $content['letters'] = $ls + array(
+    '#type' => 'container',
+    '#attributes' => array('class' => array('letters'))
+  );
+  return $content;
+}
+//Query.
+function _xoxo_brands_letters($query) {
+  $query->addExpression('SUBSTRING(b.value, :num, :num)', 'letter', array(':num' => 1));
+  $query->groupBy('letter');
+  return $query->execute()->fetchCol();
+}
+function _xoxo_brands_favorite($query) {
+  global $user;
+  $query->join('flags', 'f', 'f.fid = fc.fid');
+  $query->join('node', 'n', 'n.nid = fc.content_id');
+  $query
+    ->condition('n.type', 'brand')
+    ->condition('f.name', 'added_to_my_kitchen')
+    ->condition('fc.content_type', 'node')
+    ->condition('fc.uid', $user->uid);
+  return $query;
+}
+//Block.
+function xoxo_brands_block_view($delta = '') {
+  global $user;
+  $b = array();
+  if ($delta == 'xoxo_index') {
+    $b['content'] = _xoxo_brands_index();
+  }
+  else if ($delta == 'xoxo_favorite_brands') {
+    $b['content'] = drupal_get_form('_xoxo_brands_favorites_form');
+  }
+  return $b;
+}
+function xoxo_brands_block_configure($delta = '') {
+  $f = array();
+  $t = array('#type' => 'textfield');
+  if ($delta == 'xoxo_index') {
+    $ttls = array('Glossary Path', 'Glossary Digit Path', 'Glossary Favorites Path', 'Prefix', 'Separator');
+    $ids = array(
+      'xoxo_brands_xoxo_index_path',
+      'xoxo_brands_xoxo_index_dpath',
+      'xoxo_brands_xoxo_index_fpath',
+      'xoxo_brands_xoxo_index_prefix',
+      'xoxo_brands_xoxo_index_separator'
+    );
+    $dfs = array(
+      'brands/!letter',
+      'brands/digit',
+      'brands/favorites',
+      'Alphabetical brand index',
+      ' '
+    );
+  }
+  else if ($delta == 'xoxo_favorite_brands') {
+    $f['xoxo_brands_xoxo_favorite_brands_link'] = array(
+      '#type' => 'link',
+      '#href' => 'admin/structure/types/manage/brand/display/icon',
+      '#title' => t('Single brand output settings.')
+    );
+  }
+  foreach ($ids as $key => $id) {
+    $f[$id] = $t + array(
+      '#title' => t($ttls[$key]),
+      '#default_value' => variable_get($id, $dfs[$key])
+    );
+  }
+  return $f;
+}
+function xoxo_brands_block_save($delta = '', $edit = array()) {
+  if ($delta == 'xoxo_index') {
+    $sets = array(
+      'xoxo_brands_xoxo_index_path',
+      'xoxo_brands_xoxo_index_dpath',
+      'xoxo_brands_xoxo_index_fpath',
+      'xoxo_brands_xoxo_index_prefix',
+      'xoxo_brands_xoxo_index_separator'
+    );
+  }
+  foreach ($sets as $set) {
+    variable_set($set, $edit[$set]);
+  }
+}
+//String.
+function _xoxo_brands_array($name = '') {
+  $l = 20;
+  $pat = '!name%';
+  if (!empty($name)) {
+    $n = format_string($pat, array('!name' => db_like($name)));
+    $query = db_select('xoxo_brands', 'b')->condition('b.value', $n, 'LIKE');
+    $query->addField('b', 'value');
+    $query->range(0, $l);
+    return $query->execute()->fetchAllKeyed(0, 0);
+  }
+}
+function _xoxo_brands_letter($let = FALSE) {
+  $f = '';
+  $d = '#';
+  $opts = array();
+  if ($let == 'dig') {
+    $let = $d;
+    $href = variable_get('xoxo_brands_xoxo_index_dpath', 'brands/digit');
+    $class = 'digit';
+  }
+  else if ($let == 'fav') {
+    $let = $f;
+    $href = variable_get('xoxo_brands_xoxo_index_fpath', 'brands/favorites');
+    $class = 'favorites';
+    $opts = array('html' => TRUE);
+  }
+  else {
+    $href = format_string(
+      variable_get('xoxo_brands_xoxo_index_path', 'brands/!letter'),
+      array('!letter' => $let)
+    );
+    $class = 'letter';
+  }
+  return array(
+    '#type' => 'link',
+    '#title' => $let,
+    '#href' => $href,
+    '#attributes' => array('class' => array($class)),
+    '#options' => $opts
+  );
+}
+//Form.
+function _xoxo_brands_favorites_form($form, &$form_state) {
+  $l = 20;
+  $path = drupal_get_path('module', 'xoxo_brands') . '/';
+  $id = drupal_html_id('favorite-brands');
+  $form = array(
+    '#attributes' => array('id' => $id),
+  );
+  $form['trigger'] = array(
+    '#type' => 'textfield',
+    '#attributes' => array('class' => array('brands-refresh')),
+    '#ajax' => array(
+      'callback' => '_xoxo_brands_refresh',
+      'event' => 'click',
+      'wrapper' => $id
+    ),
+    '#attached' => array(
+      'js' => array($path . 'xoxo_brands.js'),
+      'css' => array($path . 'xoxo_brands.css')
+    ),
+  );
+  $q = _xoxo_brands_favorite(db_select('flag_content', 'fc'))->range(0, $l);
+  $q->addField('fc', 'content_id');
+  $nodes = node_load_multiple($q->execute()->fetchCol());
+  foreach ($nodes as $node) {
+    $form[$node->nid] = node_view($node, 'icon');
+  }
+  return $form;
+}
+function _xoxo_brands_refresh($form, $form_state) {
+  return $form;
+}

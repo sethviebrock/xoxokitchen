@@ -1,0 +1,23 @@
+<?php
+
+/**
+ * Implements hook_requirements().
+ */
+function symfony_requirements($phase) {
+  $requirements = array();
+
+  switch ($phase) {
+    case 'runtime':
+      // Check to make sure the Symfony library is available.
+      $symfony = libraries_detect('symfony');
+      $requirements['symfony'] = array(
+        'title' => t('Symfony'),
+        'value' => $symfony['installed'] ? $symfony['version'] : t('Not installed'),
+        'description' => isset($symfony['error message']) ? $symfony['error message'] : '',
+        'severity' => $symfony['installed'] ? REQUIREMENT_OK : REQUIREMENT_WARNING,
+      );
+      break;
+  }
+
+  return $requirements;
+}

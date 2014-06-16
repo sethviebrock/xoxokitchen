@@ -1,0 +1,46 @@
+.search-refresh {
+  display: none;
+}
+
+
+.ui-dialog .ui-dialog-content span.ing-name,
+.xoxo-custom-selected .xoxo-search-node-add,
+.xoxo-custom-selected .xoxo-search-amount,
+.xoxo-custom-selected .xoxo-search-name,
+.xoxo-custom-selected .brand-wrapper,
+.xoxo-custom-selected .xoxo-search-edit,
+.xoxo-custom-selected .xoxo-search-search,
+.xoxo-custom-selected .xoxo-search-clear,
+.xoxo-custom-selected .xoxo-search-add-edit,
+.xoxo-custom-selected .xoxo-search-amount,
+.xoxo-custom-selected .xoxo-search-fraction,
+.xoxo-custom-selected .xoxo-search-unit,
+.field-type-ingredients .field-add-more-submit,
+.xoxo-selected .xoxo-search-add-amount,
+.xoxo-selected .xoxo-search-add-fraction,
+.xoxo-selected .xoxo-search-add-unit,
+.xoxo-empty .xoxo-search-edit,
+.xoxo-empty .xoxo-search-add-edit,
+.xoxo-empty .xoxo-search-clear,
+.xoxo-empty .xoxo-search-add-clear,
+.xoxo-selected .xoxo-search-add-clear,
+.xoxo-selected .xoxo-search-add,
+.xoxo-selected .xoxo-search-clear,
+.xoxo-selected .xoxo-search-add-edit,
+.xoxo-selected .xoxo-search-search,
+.xoxo-selected .xoxo-search-node-add {
+  display: none;
+}
+
+.xoxo-custom-selected .xoxo-search-add,
+.xoxo-custom-selected .xoxo-search-add-clear,
+.xoxo-custom-selected .xoxo-search-add-amount,
+.xoxo-custom-selected .xoxo-search-add-fraction,
+.xoxo-custom-selected .xoxo-search-add-unit,
+.xoxo-selected .xoxo-search-edit,
+.xoxo-selected .xoxo-search-clear,
+.xoxo-empty .xoxo-search-add,
+.xoxo-empty .xoxo-search-search,
+.xoxo-empty .xoxo-search-node-add {
+  display: inline;
+}

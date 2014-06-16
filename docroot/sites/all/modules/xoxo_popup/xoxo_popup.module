@@ -1,0 +1,12 @@
+<?php
+function xoxo_popup_menu() {
+  $items = array();
+  $items['xoxo-popup/%node'] = array(
+    'title' => 'Custom Popup Page',
+    'page callback' => 'node_page_view',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+    'description' => 'Page to return content in Shadowbox popup.'
+  );
+  return $items;
+}

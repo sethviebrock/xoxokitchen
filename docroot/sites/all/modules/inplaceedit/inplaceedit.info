@@ -1,0 +1,5 @@
+name = In-Place Edit
+description = in-place edit api
+package = Warecorp
+core = 7.x
+version = "7.x-1.x-dev"

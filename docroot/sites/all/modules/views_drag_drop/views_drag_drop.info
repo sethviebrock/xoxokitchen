@@ -1,0 +1,20 @@
+name = Views Drag And Drop
+description = Adds jQuery drag/drop support for Views
+package = Views
+core = 7.x
+php = 5.1
+
+; Always available CSS
+stylesheets[all][] = css/views_drag_drop.css
+
+dependencies[] = views
+
+files[] = includes/views_drag_drop.views.inc
+files[] = includes/views_drag_drop_plugin_style_dragdrop_draggable.inc
+files[] = includes/views_drag_drop_plugin_style_dragdrop_droppable.inc
+files[] = theme/views_dragdrop.theme.inc
+
+version = "7.x-1.x-dev"
+
+
+

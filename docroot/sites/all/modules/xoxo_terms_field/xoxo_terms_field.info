@@ -1,0 +1,4 @@
+name = XOXO Terms Field
+description = Widget for term reference field and some customizations related to it.
+core = 7.x
+package = Warecorp

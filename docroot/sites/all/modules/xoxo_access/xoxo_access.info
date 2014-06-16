@@ -1,0 +1,7 @@
+name = XOXO Access
+description = XOXO access regulator.
+
+package = Warecorp
+core = 7.x
+version = "7.x-1.x-dev"
+files[] = xoxo_access.inc

@@ -1,0 +1,772 @@
+<?php
+// info: xoxo_nutr.module, v0.3 2012/4/11 Segei Churilo
+
+define('XOXO_THEME', 'xoxo');
+define('XOXO_NUTR_UOM_CAL', 0);
+define('XOXO_NUTR_UOM_CAL_LABEL', 'kCal');
+define('XOXO_NUTR_SERVINGS', 'field_recipe_servings');
+define('XOXO_NUTR_FIELD_NUTR', 'field_recipe_nutritional');
+
+define('XOXO_NUTR_G_UOM_TID', 2428);
+define('XOXO_NUTR_MG_UOM_TID', 2673);
+define('XOXO_NUTR_G_UOM_NAME', 'G');
+define('XOXO_NUTR_MG_UOM_NAME', 'Mg');
+//XOXO_FIELDS_UOM_VID
+/**
+ * Implementation of hook_init
+ */
+function xoxo_nutr_init() {
+}
+
+/**
+ * Implementation of hook_permission
+ */
+function xoxo_nutr_permission() {
+  return array(
+    'administer_nutr' => array(
+      'title' => t('Administer nutritional settings'), 
+    ),
+  );
+}
+
+/*
+ * Implementation of hook_menu
+ */
+function xoxo_nutr_menu() {
+  $items = array();
+  $items['admin/config/development/xoxo-nutritional'] = array(
+    'title' => t('Nutritional settings'),
+    'page arguments' => array('_xoxo_nutr_settings_form'),
+    'page callback' => 'drupal_get_form', 
+    'access arguments' => array('administer_nutr'),
+  );
+  
+  return $items;
+}
+
+
+/**
+ * Implementation of hook_node_presave
+ */
+function xoxo_nutr_node_presave($node) {
+  if($node->type == 'recipe') {
+    $data = _xoxo_nutr_nutr_info($node);
+    if($data) {
+      $node->{XOXO_NUTR_FIELD_NUTR}[LANGUAGE_NONE][0]['value'] = serialize($data);
+    }
+    else {
+      $node->{XOXO_NUTR_FIELD_NUTR}[LANGUAGE_NONE][0]['value'] = '';
+    }
+  }
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function xoxo_nutr_field_formatter_info() {
+  return array(
+    'xoxo_nutr_info' => array(
+      'label' => t('Nutritional info'),
+      'field types' => array('text'),
+      'multiple values' => FIELD_BEHAVIOR_DEFAULT,
+    ),
+    'xoxo_nutr_info_component' => array(
+      'label' => t('Nutritional info (component)'),
+      'field types' => array('text_long'),
+      'multiple values' => FIELD_BEHAVIOR_DEFAULT,
+    ),
+  );
+}
+ 
+/**
+ * Implements hook_field_formatter_view().
+ */
+function xoxo_nutr_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  if($display['type'] == 'xoxo_nutr_info') {
+    if(isset($items[0]['value'])) {
+      $value = @unserialize($items[0]['value']);
+      if(!empty($value)) {
+        $elements[0] = array(
+          '#markup' => theme(
+            'xoxo_nutr_formatter_xoxo_nutr_info', 
+            array(
+              'nutritional' => $value, 
+              'field' => $instance
+            )
+          ),
+        );
+        return $elements;
+      }
+    }
+  }
+  elseif($display['type'] == 'xoxo_nutr_info_component') {
+    if(isset($items[0]['value'])) {
+      $value = @unserialize($items[0]['value']);
+      if(!empty($value)) {
+        $data = array();
+        $itms = array();
+        foreach($value as $k => $v) {
+          if(strpos($k, '_uom') !== FALSE) {
+            $key2 = str_replace('_uom', '', $k);
+            $data[$key2]['uom'] = $v;
+          }
+          elseif(strpos($k, '_per_serving') !== FALSE) {
+            $key2 = str_replace('_per_serving', '', $k);
+            $data[$key2]['value'] = $v;
+            $data[$key2]['per_serving'] = TRUE;
+          }
+          else {
+            $data[$k]['value'] = $v;
+          }
+        }
+        foreach($data as $k => $v) {
+          if(!isset($v['value'])) {
+            unset($data[$k]);
+          }
+          else {
+            $uom = (isset($v['uom'])) ? $v['uom'] : XOXO_NUTR_UOM_CAL_LABEL;
+            $psrvng = ($v['per_serving']) ? ' '.t('per serving') : '';
+            $itms[] = array('data' => strtoupper($k).$psrvng.': '.$v['value'].' '.$uom);
+          }
+        }
+
+        if($itms) {
+          $elements[0] = array(
+            '#markup' => theme('item_list', array('items' => $itms)),
+          );
+          return $elements;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function xoxo_nutr_theme() {
+  return array(
+    'xoxo_nutr_formatter_xoxo_nutr_info' => array(
+      'variables' => array('nutritional' => NULL),
+      'template' => 'nutritional-field',
+      'path' => drupal_get_path('theme', XOXO_THEME).'/templates/',
+    ),
+  );
+}
+
+/**
+ * Gets nutritional info from node $recipe
+ * @param object(node) or integer(nid) $recipe
+ */
+function _xoxo_nutr_nutr_info($recipe, $servings = 0) {
+  global $user;
+  $status = TRUE;
+  $fields_temp = _xoxo_nutr_nutr_fields();
+  foreach($fields_temp as $k => $v) {
+    $fields[t($k)] = $v;
+  }
+  
+  if(empty($recipe->{XOXO_FIELDS_RECIPE_INGREDIENTS_FIELD}[LANGUAGE_NONE])) {
+    if($user->uid == 1 && variable_get('xoxo_nutr_print_debug', FALSE)) {
+      drupal_set_message('There are no ingredients to calculate nutritional info.');
+    }
+  
+    return FALSE;
+  }
+  
+  if(!$servings) {
+    if(isset($recipe->{XOXO_NUTR_SERVINGS}[LANGUAGE_NONE][0]['value']) && is_numeric($recipe->{XOXO_NUTR_SERVINGS}[LANGUAGE_NONE][0]['value'])) {
+      $servings = $recipe->{XOXO_NUTR_SERVINGS}[LANGUAGE_NONE][0]['value'];
+    }
+    else {
+      $servings = 1;
+    }
+  }
+
+  $components = array();
+  $cnids = array();
+  foreach($recipe->{XOXO_FIELDS_RECIPE_INGREDIENTS_FIELD}[LANGUAGE_NONE] as $component) {
+    $cnids[] = $component['nid'];
+    $components[$component['nid']] = array(
+      'amount' => _xoxo_nutr_prepare_amount_value($component['amount']),
+      'uom' => $component['unit']
+    );
+  }
+
+  $q = "
+    SELECT
+      f.field_component_nutritional_value AS data,
+      f.entity_id AS nid
+    FROM
+      field_data_field_component_nutritional f
+    WHERE
+      f.entity_id IN (".implode(',', $cnids).")";
+  $result = db_query(
+    $q
+  )->fetchAll();
+ 
+  if(count($recipe->{XOXO_FIELDS_RECIPE_INGREDIENTS_FIELD}[LANGUAGE_NONE]) != count($result)) {
+    $nids_found = array();
+    foreach($result as $obj) {
+      $nids_found[] = $obj->nid;
+    }
+    $difference = array_diff($cnids, $nids_found);
+    if($user->uid == 1 && variable_get('xoxo_nutr_print_debug', FALSE)) {
+      drupal_set_message(t('Nutritional info not found for component(s):@nids.', array('@nids' => implode(', ', $difference))));
+    }
+    return FALSE;
+  }
+  
+  
+  $sizes = _xoxo_nutr_get_serving_sizes($cnids);
+  $overall = array();
+        
+  foreach($result as $obj) {
+    // if there is no nutritional data than skip
+    if(empty($obj->data)) {
+      if($user->uid == 1 && variable_get('xoxo_nutr_print_debug', FALSE)) {
+        drupal_set_message(t('No nutritional data found for component @nid.', array('@nid' => $obj->nid)));
+      }
+      return FALSE;
+    }
+    $data = unserialize($obj->data);
+
+    // if there is no amount/uom provided than skip
+    if(!isset($sizes[$obj->nid]['size'], $sizes[$obj->nid]['uom'])) {
+      if($user->uid == 1 && variable_get('xoxo_nutr_print_debug', FALSE)) {
+        drupal_set_message(t('There is no amount/uom info found for component @nid.', array('@nid' => $obj->nid)));
+      }
+      return FALSE;
+    }
+    
+    // if there is no coeff available than also skip
+    $coeff = _xoxo_nutr_coeff($components[$obj->nid]['uom'], $sizes[$obj->nid]['uom']);
+   
+    if(!$coeff) {
+      return FALSE;
+    }
+        
+    $components[$obj->nid]['#base_serving_size'] = $sizes[$obj->nid]; 
+    $components[$obj->nid]['#coeff'] = $coeff;
+    $components[$obj->nid]['#eq_amount'] = $coeff * $components[$obj->nid]['amount'];
+    $components[$obj->nid]['#eq_servings'] = $components[$obj->nid]['#eq_amount'] / $components[$obj->nid]['#base_serving_size']['size'];
+    
+    foreach($fields as $label => $field) {
+      if(!isset($data[$field['amount']]) || (!is_null($field['uom']) && !isset($data[$field['uom']]))) {
+        continue;
+      }
+      
+      $amount = $data[$field['amount']];
+      $option = 0;
+      if(strpos($amount, '<') !== FALSE) {
+        $option = -1;
+        $amount = str_replace('<', '', $amount);
+      }
+      elseif(strpos($amount, '>') !== FALSE) {
+        $option = 1;
+        $amount = str_replace('<', '', $amount);
+      }
+      
+      $amount = $amount * $components[$obj->nid]['#eq_servings'];
+      $uom = (is_null($field['uom'])) ? XOXO_NUTR_UOM_CAL_LABEL : $data[$field['uom']];
+      $tid = ($uom != XOXO_NUTR_UOM_CAL_LABEL) ? _xoxo_import_get_term_id(XOXO_IMPORT_UOM_VID, $uom) : XOXO_NUTR_UOM_CAL;
+      $components[$obj->nid]['#components'][$label] = array(
+        'amount' => $amount,
+        'uom' => $uom,
+        'tid' => $tid,
+        'option' => $option,
+      );
+      
+      if(!isset($overall[$label]['#uom'])) {
+        $overall[$label]['#uom'] = array(
+          'uom' => $uom,
+          'tid' => $tid,
+        );
+        $overall[$label]['#summary'] = array(
+          'amount' => 0,
+          'option' => 0,
+          'uom' => $uom,
+        );
+      }
+      
+      if($overall[$label]['#uom']['tid'] == $tid) {
+        $overall[$label]['#data'][$obj->nid] = array(
+          'amount' => $amount,
+          'uom' => $uom,
+          'option' => $option,
+        );
+        $overall[$label]['#summary'] = array(
+          'amount' => $overall[$label]['#summary']['amount'] + $amount,
+          'option' => $overall[$label]['#summary']['option'] + $option,
+        );
+      }
+      else {
+        // convert uoms for attribute
+        $coeff = _xoxo_nutr_coeff($tid, $overall[$label]['#uom']['tid']);
+        if($coeff) {
+          $overall[$label]['#data'][$obj->nid] = array(
+            'amount' => $amount,
+            'uom' => $uom,
+            'option' => $option,
+          );
+          $overall[$label]['#summary'] = array(
+            'amount' => $overall[$label]['#summary']['amount'] + $amount,
+            'option' => $overall[$label]['#summary']['option'] + $option,
+          );
+        }
+      }
+    }
+  }
+
+  $overall_render = array();
+  $i = 0;
+  foreach($overall as $category => $statistics) {
+    $overall_render[$i]['property'] = $category;
+    $overall_render[$i]['amount_per_serving'] = sprintf("%01.2f", $statistics['#summary']['amount'] / $servings);
+    $overall_render[$i]['amount_render'] = round($overall_render[$i]['amount_per_serving']); 
+    if($overall_render[$i]['amount_render'] == 0) {
+      unset($overall_render[$i]);
+      continue;
+    }
+    $overall_render[$i]['uom'] = $overall[$category]['#uom']['uom']; 
+    
+     if($overall_render[$i]['amount_per_serving'] > 1000 && $statistics['#uom']['tid'] == XOXO_NUTR_MG_UOM_TID) {
+      $overall[$category]['#summary']['amount'] = $overall[$category]['#summary']['amount']/1000;
+      $overall[$category]['#uom']['tid'] = XOXO_NUTR_G_UOM_TID;
+      $overall[$category]['#uom']['uom'] = XOXO_NUTR_G_UOM_NAME;
+      $overall_render[$i]['amount_per_serving'] = sprintf("%01.2f", $overall_render[$i]['amount_per_serving']/1000);
+      $overall_render[$i]['amount_render'] = round($overall_render[$i]['amount_per_serving']); 
+      $overall_render[$i]['uom'] = XOXO_NUTR_G_UOM_NAME;
+    }
+    
+    if($overall[$category]['#summary']['option'] > 0) {
+      $overall_render[$i]['amount_render'] = '>'.$overall_render[$i]['amount_render'];
+    }
+    elseif($overall[$category]['#summary']['option'] < 0) {
+      $overall_render[$i]['amount_render'] = '<'.$overall_render[$i]['amount_render'];
+    }
+    $i++;
+  }
+  
+  // print descriptive info
+  if($user->uid == 1 && variable_get('xoxo_nutr_print_debug', FALSE)) {
+    _xoxo_nutr_debug_info($components, $overall, $servings);
+  }
+  
+  return $overall_render;
+}
+
+function _xoxo_nutr_debug_info($components, $overall, $servings) {
+  global $user;
+  ksort($components);
+  $c = array();
+  $c_header = array(
+    'Ingredient', 
+    'Amount', 
+    'Serving size', 
+    'Convert coefficient', 
+    'Equivalent amount', 
+    'Equivalent servings', 
+    'Content per serving',
+    'Total content'
+  );
+  $uoms = array();
+  foreach($components as $nid => $component) {
+    if(!isset($uoms[$component['uom']])) {
+      $u = taxonomy_term_load_multiple(array($component['uom']));
+      $uoms[$component['uom']] = $u[$component['uom']]->name;
+    }
+    if(!isset($component['#base_serving_size'])) {
+      $component['#base_serving_size']['uom'] = '';
+      $component['#base_serving_size']['amount'] = '-';
+    }
+    elseif(!isset($uoms[$component['#base_serving_size']['uom']])) {
+      $u = taxonomy_term_load_multiple(array($component['#base_serving_size']['uom']));
+      $uoms[$component['#base_serving_size']['uom']] = $u[$component['#base_serving_size']['uom']]->name;
+    }
+    
+    $content1 = '';
+    $content2 = '';
+    foreach($component['#components'] as $label => $info) {
+      if($info['option'] == 0) {
+        $opt = '';
+      }
+      elseif($info['option'] > 0) {
+        $opt = '>';
+      }
+      else {
+        $opt = '<';
+      }
+      $content1 .= $label.': '.$opt.sprintf("%01.0f", $info['amount']/$component['#eq_servings']).' '.$info['uom'].'<br/>';
+      $content2 .= $label.': '.$opt.sprintf("%01.1f", $info['amount']).' '.$info['uom'].'<br/>';
+    }
+    $c[] = array(
+      l(_xoxo_nutr_title_by_nid($nid), 'node/'.$nid),
+      $component['amount'].' '.$uoms[$component['uom']],
+      $component['#base_serving_size']['size'].' '.$uoms[$component['#base_serving_size']['uom']],
+      sprintf("%01.4f", $component['#coeff']),
+      sprintf("%01.3f", $component['#eq_amount']).' '.$uoms[$component['#base_serving_size']['uom']],
+      sprintf("%01.3f", $component['#eq_servings']),
+      $content1,
+      $content2
+    );
+  }
+  
+  $c_render = theme(
+    'table',
+    array(
+      'header' => $c_header,
+      'rows' => $c,
+    )
+  );
+  drupal_set_message($c_render);
+  
+  $o = array();
+  $o_header = array(
+    'Nutritional attribute', 
+    'Total amount', 
+    'Amount by ingredient',
+    'Amount per serving',   
+  );
+  foreach($overall as $label => $info) {
+    if($info['#summary']['option'] == 0) {
+      $opt = '';
+    }
+    elseif($info['#summary']['option'] > 0) {
+      $opt = '>';
+    }
+    else {
+      $opt = '<';
+    }
+      
+    $content = '';
+    ksort($info['#data']);
+    foreach($info['#data'] as $nid => $data) {
+      if($data['option'] == 0) {
+        $opt_c = '';
+      }
+      elseif($data['option'] > 0) {
+        $opt_c = '>';
+      }
+      else {
+        $opt_c = '<';
+      }
+      $content .= l(_xoxo_nutr_title_by_nid($nid), 'node/'.$nid).': '.$opt_c.sprintf("%01.1f", $data['amount']).' '.$data['uom'].'<br/>';
+    }
+    $o[] = array(
+      $label,
+      $opt.sprintf("%01.0f", $info['#summary']['amount']).' '.$info['#uom']['uom'],
+      $content,
+      $opt.sprintf("%01.0f", $info['#summary']['amount']/$servings).' '.$info['#uom']['uom'],
+    );
+  }
+  $o_render = theme(
+    'table',
+    array(
+      'header' => $o_header,
+      'rows' => $o,
+    )
+  );
+  drupal_set_message($o_render);
+}
+
+function _xoxo_nutr_title_by_nid($nid) {
+  $q = "
+    SELECT
+      n.title AS title
+    FROM
+      node n
+    WHERE
+      n.nid = :nid
+    LIMIT 1";
+  return db_query($q, array(':nid' => $nid))->fetchField();
+}
+
+/**
+ * 
+ * Nutritional fields
+ */
+function _xoxo_nutr_nutr_fields() {
+  $code = variable_get('xoxo_nutr_attr', '');
+  if($code) {
+    eval('$f = array('.$code.');');
+    return $f;
+  }
+  /*
+   * // Calories
+'Total calories per serving' => array(
+  'amount' => 'total_calories_per_serving',
+  'uom' => NULL,
+),
+'Fat calories per serving' => array(
+  'amount' => 'fat_calories_per_serving',
+  'uom' => NULL,
+),
+// Fat
+'Total fat per serving' => array(
+  'amount' => 'total_fat_per_serving',
+  'uom' => 'total_fat_uom',
+), 
+'Saturated fat per serving' => array(
+  'amount' => 'sat_fat_per_serving',
+  'uom' => 'sat_fat_uom',
+),
+'Trans fat per serving' => array(
+  'amount' => 'trans_fat_per_serving',
+  'uom' => 'trans_fat_uom',
+),
+// Sugar, protein
+'Sugar per serving' => array(
+  'amount' => 'sugar_per_serving',
+  'uom' => 'sugar_uom',
+),
+'Protein per serving' => array(
+  'amount' => 'protein_per_serving',
+  'uom' => 'protein_uom',
+),
+// Other
+'Cholesterol per serving' => array(
+  'amount' => 'cholesterol_per_serving',
+  'uom' => 'cholesterol_uom',
+),
+'Sodium per serving' => array(
+  'amount' => 'sodium_per_serving',
+  'uom' => 'sodium_uom',
+),
+'Potassium per serving' => array(
+  'amount' => 'potassium_per_serving',
+  'uom' => 'potassium_uom',
+),
+'Carbo per serving' => array(
+  'amount' => 'carbo_per_serving',
+  'uom' => 'carbo_uom',
+),
+'Fiber per serving' => array(
+  'amount' => 'fiber_per_serving',
+  'uom' => 'fiber_uom',
+),
+   */
+}
+
+/**
+ * 
+ * Get serving size values for appropriate nids
+ * @param $nids
+ */
+function _xoxo_nutr_get_serving_sizes($nids) {
+  $q = "
+  SELECT
+    n.nid                                       AS nid,
+    size.field_component_serving_size_value     AS size,
+    uom.field_component_serving_size_uom_tid    AS uom,
+    size1.field_component_l_serving_size_value  AS size1,
+    uom1.field_component_l_serving_size_u_tid   AS uom1
+  FROM
+    node n
+  LEFT JOIN
+    field_data_field_component_serving_size size ON n.nid = size.entity_id
+  LEFT JOIN
+    field_data_field_component_serving_size_uom uom ON n.nid = uom.entity_id
+  LEFT JOIN
+    field_data_field_component_l_serving_size size1 ON n.nid = size1.entity_id
+  LEFT JOIN
+    field_data_field_component_l_serving_size_u uom1 ON n.nid = uom1.entity_id 
+  WHERE
+    n.nid IN (".implode(',', $nids).")";
+  $serving_sizes = db_query(
+    $q
+  )->fetchAll();
+
+  $data = array();
+  foreach($serving_sizes as $obj) {
+    if(isset($obj->size, $obj->uom)) {
+      $data[$obj->nid] = array(
+        'size' => $obj->size,
+        'uom' => $obj->uom,
+      );
+    }
+    elseif(isset($obj->size1, $obj->uom1)) {
+      $data[$obj->nid] = array(
+        'size' => $obj->size1,
+        'uom' => $obj->uom1,
+      );
+    }
+    else {
+      continue;
+    }
+  }
+
+  return $data;
+}
+
+/**
+ * 
+ * Nutritional settings form
+ */
+function _xoxo_nutr_settings_form() {
+  $form = array();
+  $uoms = taxonomy_get_tree(XOXO_FIELDS_UOM_VID);
+  $uoms1 = array();
+  $uoms2 = array();
+
+  $limit = 50;
+  foreach($uoms as $obj) {
+    if($limit > 0) {
+      $uoms1[$obj->tid] = $obj->name;
+      $uoms2[$obj->tid] = $obj->name;
+    }
+    $limit--;
+  }
+
+  $form['xoxo_nutr_components'] = array(
+    '#title' => t('Nutritional components'),
+    '#type' => 'fieldset',
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+  );
+  $form['xoxo_nutr_components']['xoxo_nutr_attr'] = array(
+    '#title' => t('Nutritional attributes'),
+    '#type' => 'textarea',
+    '#description' => t('For advanced users only.'),
+    '#default_value' => variable_get('xoxo_nutr_attr', ''),
+    '#attributes' => array('style' => array('font-family: courier new;')),
+  );
+ 
+  $form['xoxo_nutr_debug'] = array(
+    '#title' => t('Debug'),
+    '#type' => 'fieldset',
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+  );
+  $form['xoxo_nutr_debug']['xoxo_nutr_print_debug'] = array(
+    '#title' => t('Print descriptive info'),
+    '#type' => 'checkbox',
+    '#default_value' => variable_get('xoxo_nutr_print_debug', ''),
+  );
+  
+  $form['xoxo_nutr_coefficients'] = array(
+    '#title' => t('UOM convertion coefficients'),
+    '#type' => 'fieldset',
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+  );
+  $form['xoxo_nutr_coefficients']['available_values'] = array(
+    '#title' => t('Provided coefficients'),
+    '#type' => 'fieldset',
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+  );
+  $form['xoxo_nutr_coefficients']['available_values']['content'] = array(
+    '#markup' => '',
+  );
+  
+  array_pop($uoms1);
+  $provided_coefs = array();
+  foreach($uoms1 as $uom1_tid => $uom1_name) {
+    $form['xoxo_nutr_coefficients']['xoxo_nutr_'.$uom1_tid] = array(
+      '#title' => t('From @uom to ...', array('@uom' => $uom1_name)),
+      '#type' => 'fieldset',
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+    );
+    $first_tid = 0;
+    foreach($uoms2 as $uom2_tid => $uom2_name) {
+      if(!$first_tid) {
+        $first_tid = $uom2_tid;
+      }
+      if($uom1_tid != $uom2_tid) {
+        $value = variable_get('xoxo_nutr_coeff_'.$uom1_tid.'_'.$uom2_tid, '');
+        $description = '';
+        if($value) {
+          if(!is_numeric($value)) {
+            $description = t('Incorrect value! It must be numeric.');
+          }
+          else {
+            $description = t('Reverse coefficient is: @rev_coeff', array('@rev_coeff' => sprintf("%01.8f", 1/$value)));
+          }
+          $provided_coefs[] = array($uom1_name, $uom2_name, $value, sprintf("%01.8f", 1/$value));
+        }
+        $form['xoxo_nutr_coefficients']['xoxo_nutr_'.$uom1_tid]['xoxo_nutr_coeff_'.$uom1_tid.'_'.$uom2_tid] = array(
+          '#title' => $uom1_name.' > '.$uom2_name,
+          '#type' => 'textfield',
+          '#size' => 15, 
+          '#description' => $description,
+          '#default_value' => $value,
+        );
+      }
+    }
+    unset($uoms2[$first_tid]);
+  }
+  $form['xoxo_nutr_coefficients']['available_values']['content']['#markup'] = theme(
+    'table', array(
+      'header' => array(t('From UOM'), t('To UOM'), t('Direct coefficient'), t('Reverse coefficient')),
+      'rows' => $provided_coefs,
+    )
+  );
+  $form['#validate'] = array('_xoxo_nutr_settings_validate');
+  
+  return system_settings_form($form);
+}
+
+function _xoxo_nutr_settings_validate($form, &$form_state) {
+  foreach($form_state['values'] as $key => $value) {
+    if(empty($value)) {
+     // unset($form_state['values'][$key]);
+    }
+  }
+}
+
+/**
+ * 
+ * Get convertion coefficient
+ * @param int $tid_from
+ * @param int $tid_to
+ */
+function _xoxo_nutr_coeff($tid_from, $tid_to) {
+  if($tid_from == $tid_to) {
+    return 1;
+  }
+  elseif($coeff = variable_get('xoxo_nutr_coeff_'.$tid_from.'_'.$tid_to, '')) {
+    return $coeff;
+  } 
+  elseif($coeff = variable_get('xoxo_nutr_coeff_'.$tid_to.'_'.$tid_from, '')) {
+    return 1/$coeff;
+  }
+  $uoms = taxonomy_term_load_multiple(array($tid_from, $tid_to));
+  watchdog(
+    'xoxo_nutr', 
+    "Can't calculate nutritional info. Convert coefficient from @from to @to needed.", 
+    array(
+      '@from' => $uoms[$tid_from]->name,
+      '@to' => $uoms[$tid_to]->name,
+    ), 
+    WATCHDOG_NOTICE
+  );
+  global $user;
+  if($user->uid == 1 && variable_get('xoxo_nutr_print_debug', FALSE)) {
+    drupal_set_message(
+      t(
+        "Can't calculate nutritional info. Convert coefficient from @from to @to needed.", 
+        array(
+          '@from' => $uoms[$tid_from]->name,
+          '@to' => $uoms[$tid_to]->name,
+        )
+      )
+    );
+  }
+      
+  return NULL;
+}
+
+function _xoxo_nutr_prepare_amount_value($amount) {
+  if(!is_numeric($amount)) {
+    $parts = explode('/', $amount);
+    if(count($parts) == 2 && is_numeric($parts[0]) && is_numeric($parts[1]) && $parts[1] > 0) {
+      return round($parts[0]/$parts[1], 4);
+    }
+    
+    return 0;
+  }
+  
+  return $amount;
+}

@@ -1,0 +1,11 @@
+/* This file will hold styles that are loaded using the same media query as the normal grid. */
+
+/********
+MAIN MENU
+********/
+
+ul.main-menu li a, 
+ul.main-menu li a:visited,
+ul.main-menu li a:link {
+    font-size: 1.1em;
+}

@@ -1,0 +1,12 @@
+.recipe-add-to-calendar-input,
+.categorize-added .item-operations-wrapper,
+.categorize-removed .flag-wrapper {
+  display: none;
+}
+.categorize-removed .item-operations-wrapper,
+.categorize-added .flag-wrapper {
+  display: block;
+}
+/*.current-category {
+  color: #6F6;
+}*/

@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the xoxo_admin feature.
+ */
+
+include_once('xoxo_admin.features.inc');

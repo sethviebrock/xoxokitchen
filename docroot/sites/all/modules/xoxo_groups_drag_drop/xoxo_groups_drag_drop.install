@@ -1,0 +1,13 @@
+<?php
+function xoxo_groups_drag_drop_schema() {
+  $s['xoxo_groups_drag_drop'] = array(
+    'description' => 'Shopping list groups weights.',
+    'fields' => array(
+      'nid' => array('type' => 'int', 'not null' => TRUE, 'unsigned' => TRUE),
+      'tid' => array('type' => 'int', 'not null' => TRUE, 'unsigned' => TRUE),
+      'weight' => array('type' => 'int', 'not null' => TRUE)
+      ),
+    'primary key' => array('nid', 'tid')
+    );
+  return $s;
+}

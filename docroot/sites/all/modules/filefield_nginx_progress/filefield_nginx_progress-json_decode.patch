@@ -1,0 +1,35 @@
+diff --git filefield_nginx_progress/filefield_nginx_progress.module filefield_nginx_progress/filefield_nginx_progress.module
+index cdbb54a..48727b2 100644
+--- sites/all/modules/filefield_nginx_progress/filefield_nginx_progress.module
++++ sites/all/modules/filefield_nginx_progress/filefield_nginx_progress.module
+@@ -30,7 +30,7 @@ function filefield_nginx_progress_ajax($key) {
+   );
+   
+   $status = nginx_progress_fetch($key);
+-  if ($status['state'] == 'uploading') {
++  if (isset($status['state']) && $status['state'] == 'uploading') {
+     $progress['message'] = t('Uploading... (@current of @total)', array('@current' => format_size($status['received']), '@total' => format_size($status['size'])));
+     $progress['percentage'] = round(100 * $status['received'] / $status['size']);
+   }
+@@ -112,17 +112,9 @@ function nginx_progress_fetch($key) {
+   $url = url($base_url . '/progress', array('query' => array('X-Progress-ID' => $key), 'absolute' => TRUE, 'external' => TRUE));
+ 
+   $response = drupal_http_request($url);
+-  $status = array();
+-  // strip the extraneous parts out leaving a comma delimited list.
+-  if (preg_match("/\{(.*)\}/", $response->data, $matches) ) {
+-    $items = explode(',', $matches[1]);
+-    foreach ($items as $item) {
+-      $array = explode(':', $item);
+-      // strip quotes and spaces from key & value pair
+-      $key = trim($array[0], "' ");
+-      $value = trim($array[1], "' ");
+-      $status[$key] = $value;
+-    }
++  preg_match("/\{(.*)\}/", $response->data, $matches);
++  if(!empty($matches[0])) {
++    return json_decode($matches[0], TRUE);
+   }
+-  return $status;
++  return FALSE;
+ }

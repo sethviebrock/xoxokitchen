@@ -1,0 +1,170 @@
+.ui-draggable-dragging {
+  border: 1px solid #6fa7d0;
+  background-color: #95dcf7;
+  z-index: 202;
+}
+
+.item-draggable {
+  margin-bottom: 2px;
+  border: 1px solid #6fa7d0;
+  background-color: #95DCF7;
+  padding: 3px;
+}
+
+.item-droppable {
+  padding: 3px;
+  margin-bottom: 2px;
+  overflow: visible !important;
+  opacity: 1;
+}
+
+.droppable-state-default {
+  background-color: #eeeedf;
+}
+
+.droppable-state-hover {
+  background-color: #99cc33;
+}
+
+#drag-drop-loader {
+	background-color: #fff;
+	z-index: 210;
+	background-repeat: no-repeat;
+	background-position: center center;
+	padding: 8px;
+	opacity: 0.85;
+}
+.item-processing {
+	/*background-color: #f00 !important;*/
+}
+
+.item-draggable-wrapper {
+  position: relative;
+}
+
+.item-additional-ops {
+	display: none;
+	z-index: 201;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  background-color: #FFF;
+  padding: 3px;
+}
+.additional-op {
+	cursor: pointer !important;
+}
+.additional-op-static {
+  cursor: auto !important;
+}
+
+.additional-op-disabled {
+	cursor: auto !important;
+}
+.ui-state-disabled {
+  opacity: 1;
+}
+
+.ui-draggable-dragging .item-operations-wrapper {
+	display: none;
+}
+
+/* XOXO specific temp styles */
+.item-mark-on-hand {
+	background-color: #aaa;
+}
+
+.item-droppable-calendar {
+	min-height: 130px;
+  width: 130px;
+}
+
+.item-category {
+	padding: 5px;
+	margin-bottom: 5px;
+	border: 1px solid #000;
+}
+.category-name {
+	border: 1px solid #c5cC07;
+  background-color: #F5FC07;
+  padding: 3px;
+  font-weight: bold;
+}
+
+.item-operations-wrapper {
+	position: relative;
+}
+/*
+.shopping-list-item-content {
+	border-bottom: 1px dotted #ccc;
+	padding: 3px 0;
+}*/
+/*
+.new-shopping-list-item,
+.new-event-item {
+  background-color: #F57C87;
+}*/
+
+.item-type-recipe {
+	border: 2px solid #d504ff;
+}
+.item-type-component {
+  border: 2px solid #ffc400;
+}
+.control-error span {
+	background-color:#f99;
+}
+.control-id-shopping_list_qty input {
+	width: 50px;
+}
+.control-id-shopping_list_uom select {
+  width: 70px;
+}
+.control-success {
+	color: #99f;
+	font-weight: bold;
+}
+.shopping-list-item .item-additional-ops {
+	right: 0;
+  left: auto;
+}
+
+#op-calendar_day_description {
+	padding: 15px;
+	background-color:#eee;
+	border: 1px solid #bbb;
+	min-height: 100px;
+	min-width: 350px;
+}
+
+.current-day {
+	border: 4px #faa solid !important;
+}
+
+.view-id-test .view-content {
+	 overflow: auto;
+	 height: 230px;
+}
+
+.last-succeded {
+	color:#6F6;
+}
+.additional-op-calendar_day_description_remove  {
+	color: #000;
+}
+
+.week-day .vdd-active-item .item-draggable-calendar {
+	background-color:#fd0;
+}
+.item-mark-on-hand {
+    color: #999;
+}
+
+.input-type-textarea {
+	height: 70px;
+}
+
+.empty-value {
+	text-align: center !important;
+	color: #ccc !important;
+}

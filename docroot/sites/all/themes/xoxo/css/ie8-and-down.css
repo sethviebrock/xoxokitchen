@@ -1,0 +1,35 @@
+#block-quicktabs-components #quicktabs-container-components .fieldset-wrapper .item-wrapper .item-draggable .views-field-php, #block-quicktabs-components #quicktabs-container-components .fieldset-wrapper .item-wrapper .item-draggable .views-field-title, #block-quicktabs-components #quicktabs-container-components .fieldset-wrapper .item-wrapper .item-draggable .views-field-field-component-name {
+    display: block;
+    padding-left: 5px;
+    width: 69%;
+}
+#block-quicktabs-components #quicktabs-container-components .fieldset-wrapper .item-wrapper {
+    padding: 3px 3px 3px 3px;
+    width: 95%;
+	
+}
+*:first-child+html #block-quicktabs-components .item-list ul li {
+    margin-right: 5px;
+	width: 30%;
+	float:left;
+}
+*:first-child+html #block-quicktabs-components .item-list ul{margin-bottom:20px;}
+.page-recipes .res_img{width:75px;}
+#recipe-node-form .my_cell div.form-type-select{border:0px solid;
+/*padding-bottom:0px; height:30px; vertical-align:top;*/ padding-top:0px; padding-bottom:50px;}
+/*#recipe-node-form .my_cell div.form-item-field-recipe-ingredients-und-0-amount{border:1px solid;
+/*padding-bottom:0px; height:30px; vertical-align:top;*/ /*padding-top:0px; padding-bottom:25px;}*/
+.view-id-kitchen table tr.event-description .description-text div.my_cell {
+    background: none repeat scroll 0 0 #FFFFFF;
+    border: medium none;
+    color: #603813;
+    font-size: 12px;
+    font-weight: normal;
+    min-height: 16px;
+    padding: 0;
+    text-align: left;
+}
+*:first-child+html .two_column .info_line.red_line ol {
+	margin-left: 27px;
+	padding-left:0px;
+}

@@ -1,0 +1,60 @@
+<?php
+//Add user form changer and set temporary value for user name.
+/*function xoxo_user_form_alter(&$form, &$form_state, $form_id) {
+  if(in_array($form_id, array('user_profile_form', 'user_register_form'))) {
+    dpm($form);
+    array_unshift($form['#pre_render'], '_xoxo_user_noname');
+    $form['account']['name']['#value'] = time();
+  }
+}
+//User form with some changes.
+function _xoxo_user_noname($element) {
+  unset($element['account']['name']);
+  $element['account']['pass']['pass1']['#description'] = t('Enter Password');
+  $element['account']['pass']['pass2']['#description'] = t('Confirm Password');
+  return $element;
+}
+//Automatic user name on save.
+function xoxo_user_user_presave(&$edit, $account, $category) {
+  $edit['name'] = 'Timestamp (' . $edit['name'] . ')';
+}*/
+/*function xoxo_user_theme ($existing, $type, $theme, $path) {
+  return array(
+    'user_register_form' => array(
+      'render element' => 'form',
+      'template' => 'form'
+    )
+  );
+}*/
+//Using Name field for user name output.
+function xoxo_user_username_alter(&$name, $account) {
+  $a =
+    property_exists($account, 'field_user_name')
+    ? $account
+    : user_load($account->uid);
+  $f = field_get_items('user', $a, 'field_user_name');
+  $n = isset($f[0]['safe']) ? $f[0]['safe'] : array($name);
+  $fn = array_filter($n);
+  $name = implode(' ', $fn);
+}
+//We don't need pass strenth in password confirm element.
+function xoxo_user_element_info_alter(&$type) {
+  if (isset($type['password_confirm']['#process'])) {
+    $key = array_search(
+      'user_form_process_password_confirm',
+      $type['password_confirm']['#process']
+    );
+    if($key) {
+      unset($type['password_confirm']['#process'][$key]);
+    }
+  }
+}
+//Show user login form for anonimous user always.
+function xoxo_user_block_view_alter(&$data, $block) {
+  if ($block->module == 'user' && $block->delta == 'login') {
+    if(!$GLOBALS['user']->uid) {
+      $data['subject'] = t('User login');
+      $data['content'] = drupal_get_form('user_login_block');
+    }
+  }
+}

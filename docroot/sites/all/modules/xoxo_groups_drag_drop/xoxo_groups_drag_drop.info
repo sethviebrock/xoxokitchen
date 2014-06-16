@@ -1,0 +1,6 @@
+name 		= XOXO Groups Drag And Drop
+description	= Drag and drop functionality for shopping list groups.
+core		= 7.x
+package		= Warecorp
+files[]		= xoxo_groups_drag_drop.js
+files[]		= xoxo_groups_drag_drop.css

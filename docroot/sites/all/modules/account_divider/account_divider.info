@@ -1,0 +1,4 @@
+name = Account Divider
+description = Allows handling account data ("User name and password" extra field) separately.
+core = 7.x
+package = Warecorp

@@ -1,0 +1,7 @@
+name = XOXO Popups
+description = Provides path to open objects in popup
+core = 7.x
+package = Warecorp
+files[] = xoxo_popup.module
+scripts[] = js/xoxo_popup.js
+dependencies[] = shadowbox

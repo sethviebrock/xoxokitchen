@@ -1,0 +1,237 @@
+<?php
+function template_preprocess_week_pager(&$variables) {
+  drupal_add_library('system', 'drupal.ajax');
+  $variables['mail'] = isset($variables['mail']) ? $variables['mail'] : FALSE;
+  $handler = new date_sql_handler();
+  $dates = $handler->arg_range($variables['time']);
+  $dateeee = $dates[0]->format('Y-m-d');
+  $stamp = strtotime($dates[0]->format('Y-m-d'));
+  $intervals = array(
+    'prev' => strtotime('-1 week', $stamp),
+    'next' => strtotime('+1 week', $stamp),
+  );
+  foreach (
+    array('prev' => t('Previous'), 'next' => t('Next')) as $key => $label
+  ) {
+    $variables[$key . '_url'] =
+      ($variables['base_url'] ? $variables['base_url'] . '/' : '')
+      . _xoxo_week_sun_sat($intervals[$key])
+      . '/'
+      . 'nojs';
+    $variables[$key . '_label'] = $label;
+    $variables[$key . '_attributes'] = array('class' => array('use-ajax', $key));
+    $variables[$key . '_link'] = l(
+      $label,
+      $variables[$key . '_url'],
+      array('attributes' => $variables[$key . '_attributes'])
+    );
+  }
+  $months = array();
+  $days = array();
+  $years = array();
+  foreach(array(_xoxo_week_sun(FALSE, $stamp), _xoxo_week_sat(FALSE, $stamp)) as $day) {
+    $months[] = date('F', $day);
+    $days[] = date('j', $day);
+    $years[] = date('Y', $day);
+  }
+  $months = implode('-', array_unique($months));
+  $days = implode('-', $days);
+  $years = implode('-', array_unique($years));
+  $variables['curr_label'] = t(
+    '!months !days, !years',
+    array(
+      '!months' => $months,
+      '!days' => $days,
+      '!years' => $years
+    )
+  );
+  $variables['curr_attributes'] = array('class' => array('current-week'));
+}
+function xoxo_pager_theme($existing, $type, $theme, $path) {
+  $variables = array(
+    'time' => FALSE,
+    'base_url' => FALSE,
+    'label' => t('Current Week'),
+    'mail' => FALSE
+  );
+  return array(
+    'week_pager' => array(
+      'variables' => $variables,
+      'template' => 'week-pager'
+    )
+  );
+}
+function theme_week_pager($variables) {
+  return 'Test.';
+}
+function _xoxo_pager_autocreate_shopping_list($timestamp, $uid = NULL) {
+  if(is_null($uid)) {
+    global $user;
+    $uid = $user->uid;
+  }
+
+  module_load_include('inc', 'xoxo_week', 'xoxo_week');
+  $beginning_of_week = _xoxo_week_sun(FALSE, $timestamp);
+
+  $node = new stdClass();
+  $node->type = XOXO_FIELDS_TYPE_SHOPPING_LIST;
+  $node->title = 'Shopping list '.date('j/n/Y', $beginning_of_week).' - '.$uid;
+  $node->status = 1;
+  $node->promote = 0;
+  $node->sticky = 0;
+  $node->uid = $uid;
+  $node->language = LANGUAGE_NONE;
+  node_object_prepare($node);
+  $node->{XOXO_SHL_DATE_FIELD}[$node->language][0]['value'] = $beginning_of_week;
+  $node = node_submit($node);
+  node_save($node);
+
+  return $node;
+}
+
+
+function _xoxo_pager_get_shopping_list_by_date_author($timestamp, $uid = NULL) {
+  if(is_null($uid)) {
+    global $user;
+    $uid = $user->uid;
+  }
+
+  $result = db_query("
+    SELECT
+      n.nid AS nid
+    FROM
+      {node} n
+    LEFT JOIN
+      {field_data_".XOXO_FIELDS_DATE."_date} d ON d.entity_id = n.nid
+    WHERE
+        n.uid = :uid
+      AND
+        d.".XOXO_FIELDS_DATE."_date_value <= :date
+      AND
+        d.".XOXO_FIELDS_DATE."_date_value + 604800 > :date
+    ORDER BY
+      d.".XOXO_FIELDS_DATE."_date_value DESC
+    LIMIT 1",
+    array(
+      ':uid' => $uid,
+      ':date' => $timestamp
+    )
+  )
+  ->fetchField();
+
+  return $result;
+}
+//Menu item for shopping list.
+function xoxo_pager_menu() {
+  return array(
+    'shopping-list' => array(
+      'title' => 'Shopping List',
+      'description' => 'Shopping list for a week.',
+      'page callback' => '_xoxo_pager_shopping_list_page',
+      //      'access callback' => '_xoxo_pager_shopping_list_access',
+      'access arguments' => array('access content'),
+      'type' => MENU_CALLBACK
+    )
+  );
+}
+/* //Alter access. */
+/* function xoxo_pager_menu_alter(&$items) { */
+/*   $items['shopping-list']['access callback'] = '_xoxo_pager_redirect_on_denied'; */
+/*   $items['kitchen']['access callback'] = '_xoxo_pager_redirect_on_denied'; */
+/* } */
+/* //Shopping List access. */
+/* function _xoxo_pager_redirect_on_denied($perm) { */
+/*   if(!user_access($perm)) { */
+/*     menu_set_active_item('user'); */
+/*     return TRUE; */
+/*   } */
+/* } */
+//Form mail message.
+function xoxo_pager_mail($key, &$message, $params) {
+  if($key === 'shopping-list') {
+    //    $content = array_key_exists('content', $params) ? $params['content'] : FALSE;
+    $l = l(
+      t('Shopping List Page'),
+      'shopping-list/' . $params['date'],
+      array('absolute' => TRUE)
+    );
+    $message['subject'] = t('Shopping List');
+    $message['body'][] =
+      $l . render(_xoxo_pager_shopping_list($params['date'], TRUE));//$content;
+  }
+}
+//Shopping list renderable array.
+function _xoxo_pager_shopping_list($date = FALSE, $mail = FALSE, $print = FALSE) {
+  module_load_include('inc', 'xoxo_week', 'xoxo_week');
+  $handler = new date_sql_handler();
+  $dates = $handler->arg_range($date);
+  $valid_date = $dates[0]->format('Y-m-d');
+  $stamp = strtotime($valid_date);
+  $link_attr = array('attributes' => array('class' => 'use-ajax'));
+  $id = 'shopping-list-content';
+  $nid = _xoxo_pager_get_shopping_list_by_date_author(
+    $stamp,
+    $GLOBALS['user']->uid
+  );
+  $view_mode = ($mail) ? 'htmlmail_view' : ($print ? 'print_view' : array());
+  if(empty($nid)) {
+    $list = field_view_field(
+      'node',
+      _xoxo_pager_autocreate_shopping_list($stamp),
+      'field_shopping_list_items',
+      $view_mode
+    );
+  }
+  else {
+    $list = field_view_field(
+      'node',
+      node_load($nid),
+      'field_shopping_list_items',
+      $view_mode
+    );
+  }
+
+  $list['#weight'] = 5;
+  $content['all'] = array(
+    '#type' => 'container',
+    '#attributes' => array('id' => $id),
+    'pager' => array(
+      '#theme' => 'week_pager',
+      '#mail' => $mail,
+      '#base_url' => 'shopping-list',
+      '#time' => $valid_date,
+      '#label' => t('Your Shopping List For:')
+    ),
+    'list' => $list,
+  );
+  return $content;
+}
+//Shopping list page callback.
+function _xoxo_pager_shopping_list_page($date = FALSE, $type = FALSE) {
+  if (empty($GLOBALS['user']->uid)) {
+    drupal_goto('user');
+  }
+  if ($type == 'ajax') {
+    $content = _xoxo_pager_shopping_list($date);
+    ajax_deliver(array('#type' => 'ajax', '#commands' => array(
+      ajax_command_replace('#shopping-list-content', drupal_render($content)),
+      ajax_command_replace('#block-xoxo-pages-buttons .mail', drupal_render(_xoxo_pages_mail_link('shopping-list/' . $date))),
+      ajax_command_replace('#block-xoxo-pages-buttons .print', drupal_render(_xoxo_pages_print_link('shopping-list/' . $date)))
+    )));
+  }
+  elseif ($type == 'mail' || $date == 'mail') {
+    $content = _xoxo_pager_shopping_list($date, TRUE);
+    $address = property_exists($GLOBALS['user'], 'mail') ? $GLOBALS['user']->mail : FALSE;
+    $d = ($date == 'mail') ? FALSE : $date;
+    drupal_mail('xoxo_pager', 'shopping-list', $address, language_default(), array('date' => $d));
+    ajax_deliver(array(
+      '#type' => 'ajax',
+      '#commands' => array(ajax_command_alert(t('Your shopping list has been sent to your email.')))
+    ));
+  }
+  else {
+    $p = ($type == 'print' || $date == 'print');
+    $content = _xoxo_pager_shopping_list($date, FALSE, $p);
+    return $content;
+  }
+}

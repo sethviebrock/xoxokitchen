@@ -1,0 +1,88 @@
+<?php
+/**
+ * @file
+ * Code for the xoxo_brand feature.
+ */
+
+include_once('xoxo_brand.features.inc');
+//Drupal.
+function xoxo_brand_field_widget_info() {
+  $l = 'XOXO Brand';
+  return array(
+    'xoxo_brand' => array(
+      'label' => t($l),
+      'field types' => array('number_integer')
+    )
+  );
+}
+
+//Node.
+/*function xoxo_brand_node_view($node, $view_mode, $langcode) {
+  if ($node->type != 'brand') {
+    return FALSE;
+  }
+  $node->content['add_remove'] = array(
+    '#type' => 'html_tag',
+    '#tag' => 'div',
+    '#value' => flag_create_link('added_to_my_kitchen', $node->nid),
+    '#attributes' => array('class' => array('add_remove'))
+  );
+}*/
+//Field.
+function xoxo_brand_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  $a = array(
+    '#type' => 'textfield',
+    '#autocomplete_path' => 'xoxo-brands',
+    '#default_value' => _xoxo_brand_name(drupal_array_get_nested_value($items, array($delta))),
+    '#element_validate' => array('_xoxo_brand_bid')
+  );
+  return $element + $a;
+} 
+//Integer.
+function _xoxo_brand_name($id = 0) {
+  $t1 = 'xoxo_brands';
+  $q = db_select($t1, 'b')->condition('b.bid', $id);
+  $q->addField('b', 'value');
+  return $q->execute()->fetchField();
+}
+//Form.
+function _xoxo_brand_bid($element, &$form_state) {
+  $m = 'No such brand.';
+  $name  = drupal_array_get_nested_value($form_state['values'], $element['#parents']);
+  if (!empty($name)) {
+    $q = db_select('xoxo_brands', 'b')->condition('b.value', $name);
+    $q->addField('b', 'bid');
+    $bid = $q->execute()->fetchField();
+    if (!empty($bid)) {
+      form_set_value($element, array('value' => $bid), $form_state);
+    }
+    else {
+      form_error($element, t($m));
+    }
+  }
+}
+//Flag.
+function xoxo_brand_preprocess_flag(&$vars) {
+  $m1 = 'Add to My Kitchen';
+  $m2 = 'Remove from My Kitchen';
+  $node = node_load($vars['content_id']);
+  if (
+    (isset($node->type) ? $node->type == 'brand' : FALSE)
+    && $vars['flag']->name == 'added_to_my_kitchen'
+  ) {
+    $vars['link_text'] = $vars['status'] == 'flagged' ? $m2 : $m1;
+  }
+}
+//Page.
+function xoxo_brand_preprocess_page(&$vars) {
+  $i = menu_get_item();
+  $view = ($i['path'] == 'node/%/view' || $i['path'] == 'node/%') && $i['page_arguments'][0]->type == 'brand';
+  if ($view) {
+    $vars['title_prefix']['flag'] = array(
+      '#type' => 'html_tag',
+      '#tag' => 'div',
+      '#value' => flag_create_link('added_to_my_kitchen', $i['page_arguments'][0]->nid),
+      '#attributes' => array('class' => array('add_remove'))
+    );
+  }
+}
