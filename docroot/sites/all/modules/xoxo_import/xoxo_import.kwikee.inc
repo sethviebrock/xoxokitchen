@@ -2983,7 +2983,7 @@ function _xoxo_import_kwikee_cron() {
     }
     
     if($queue_fid) {     
-      $status = _xoxo_import_kwikee_upate_run($status, $runs, &$context, $queue_fid, $file, $error_fids);
+      $status = _xoxo_import_kwikee_upate_run($status, $runs, $context, $queue_fid, $file, $error_fids);
       if($status) {
         if(empty($context['sandbox']['crons'])) {
           $context['sandbox']['crons'] = 1;
@@ -2999,7 +2999,7 @@ function _xoxo_import_kwikee_cron() {
   }
 }
 
-function _xoxo_import_kwikee_upate_run($status, $runs, $context, $queue_fid, $file, $error_fids) {
+function _xoxo_import_kwikee_upate_run($status, $runs, &$context, $queue_fid, $file, $error_fids) {
   while($status && $runs > 0) {
     $status = _xoxo_import_kwikee_import_file_process($queue_fid, $context, TRUE);
     $runs--;
@@ -3020,7 +3020,7 @@ function _xoxo_import_kwikee_upate_run($status, $runs, $context, $queue_fid, $fi
       
       if($time_spent_on_run < 3) { // if run is less than 3 sec
         $runs = 1;
-        $status = _xoxo_import_kwikee_upate_run($status, $runs, &$context, $queue_fid, $file, $error_fids);
+        $status = _xoxo_import_kwikee_upate_run($status, $runs, $context, $queue_fid, $file, $error_fids);
       }
       else {
         variable_set('xoxo_import_queue_fid', $queue_fid);
