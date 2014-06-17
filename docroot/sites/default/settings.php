@@ -508,7 +508,7 @@ $conf['404_fast_html'] = '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML+RDFa 1.0//EN"
  * sure that you understand the effects of this feature before uncommenting the
  * line below.
  */
-# drupal_fast_404();
+drupal_fast_404();
 
 /**
  * External access proxy settings:
