@@ -45,7 +45,7 @@ function _inplaceedit_ajax_callback() {
 
     // invoke hook_inplaceedit_perform_changes
     foreach(module_implements('inplaceedit_perform_changes') as $module) {
-      if(call_user_func($module.'_inplaceedit_perform_changes', $control_id, &$value, &$arguments, $prev_value)) {
+      if(call_user_func_array($module.'_inplaceedit_perform_changes', array($control_id, &$value, &$arguments, $prev_value))) {
         $status = TRUE;
       }
     };

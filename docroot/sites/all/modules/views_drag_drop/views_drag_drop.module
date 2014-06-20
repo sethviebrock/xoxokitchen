@@ -62,7 +62,7 @@ function views_drag_drop_permission() {
   // invoke hook_views_drag_drop_assign_actions
   $actions = array();
   foreach(module_implements('views_drag_drop_assign_actions') as $module) {
-    call_user_func($module.'_views_drag_drop_assign_actions', &$actions, NULL);
+    call_user_func_array($module.'_views_drag_drop_assign_actions', array(&$actions, $null = NULL));
   };
 
   foreach($actions as $action => $config) {
@@ -356,7 +356,7 @@ function _views_drag_drop_additional_ops($preset, &$args, &$classes_parent, &$no
     // invoke hook_views_drag_drop_assign_actions
     $temp_actions = array();
     foreach(module_implements('views_drag_drop_assign_actions') as $module) {
-      call_user_func($module.'_views_drag_drop_assign_actions', &$temp_actions, $args);
+      call_user_func_array($module.'_views_drag_drop_assign_actions', array(&$temp_actions, $args));
     };
 
     foreach($temp_actions as $action => $config) {
@@ -436,7 +436,7 @@ function _views_drag_drop_additional_ops($preset, &$args, &$classes_parent, &$no
 
 function _views_drag_drop_additional_op_status($status, $preset, $action, &$args) {
   if(is_array($status) && isset($status['callback'])) {
-    return call_user_func($status['callback'], $preset, $action, &$args);
+    return call_user_func_array($status['callback'], array($preset, $action, &$args));
   }
   else {
     return (bool)$status;
@@ -521,7 +521,7 @@ function _views_drag_drop_init_dragdrop($preset) {
     $actions = array();
     $actions2 = array();
     foreach(module_implements('views_drag_drop_assign_actions') as $module) {
-      call_user_func($module.'_views_drag_drop_assign_actions', &$actions, NULL);
+      call_user_func_array($module.'_views_drag_drop_assign_actions', array(&$actions, $null = NULL));
     };
     foreach($actions as $action => $config) {
       // need to test this behaviour
@@ -688,14 +688,14 @@ function _views_drag_drop_ajax_callback($ajax = TRUE, $args = array()) {
           }
           // invoke hook_views_drag_drop_node_presave
           foreach(module_implements('views_drag_drop_node_presave') as $module) {
-            call_user_func($module.'_views_drag_drop_node_presave', &$node, &$response_array, &$drag_arg, &$drop_arg, $preset, $settings);
+            call_user_func_array($module.'_views_drag_drop_node_presave', array(&$node, &$response_array, &$drag_arg, &$drop_arg, $preset, $settings));
           };
           node_save($node);
         } break;
         case 'edit' : {
           // invoke hook_views_drag_drop_node_alter
           foreach(module_implements('views_drag_drop_node_alter') as $module) {
-            call_user_func($module.'_views_drag_drop_node_alter', &$node, &$response_array, &$drag_arg, &$drop_arg, $preset, $settings);
+            call_user_func_array($module.'_views_drag_drop_node_alter', array(&$node, &$response_array, &$drag_arg, &$drop_arg, $preset, $settings));
           };
           node_save($node);
         } break;
@@ -807,7 +807,7 @@ function _views_drag_drop_ajax_callback($ajax = TRUE, $args = array()) {
     if(user_access('access_op_'.$preset.'_'.$action) || substr($action, 0, 7) == 'addcat_' || substr($action, 0, 4) == 'cat_') {
       $actions = array();
       foreach(module_implements('views_drag_drop_assign_actions') as $module) {
-        call_user_func($module.'_views_drag_drop_assign_actions', &$actions, NULL);
+        call_user_func_array($module.'_views_drag_drop_assign_actions', array(&$actions, $null = NULL));
       };
       if(isset($actions[$action]['new_action'])) {
         $new_action = $actions[$action]['new_action'];
@@ -844,7 +844,7 @@ function _views_drag_drop_ajax_callback($ajax = TRUE, $args = array()) {
 
       // invoke hook_views_drag_drop_perform_actions
       foreach(module_implements('views_drag_drop_perform_actions') as $module) {
-        if(call_user_func($module.'_views_drag_drop_perform_actions', $action, &$output, &$new_action, $preset, &$drag_args, &$options)) {
+        if(call_user_func_array($module.'_views_drag_drop_perform_actions', array($action, &$output, &$new_action, $preset, &$drag_args, &$options))) {
           $status = TRUE;
         }
       };
@@ -1354,7 +1354,7 @@ function _views_drag_drop_edit_node(&$node, &$locked, &$disable_dpoppable, $args
       }
 
       //disable drop condisions
-      _views_drag_drop_check_disable_condision(&$disable_dpoppable, $field, $node->{$field}[$node->language], $settings, $cardinality);
+      _views_drag_drop_check_disable_condision($disable_dpoppable, $field, $node->{$field}[$node->language], $settings, $cardinality);
     }
     else {
       // standard node attributes
