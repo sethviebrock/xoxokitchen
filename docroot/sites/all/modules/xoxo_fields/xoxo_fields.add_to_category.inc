@@ -336,7 +336,7 @@ function _xoxo_fields_addcat_status($preset, $action, &$args) {
 }
 
 function _xoxo_fields_addcat_perform_actions($action, &$output, &$new_action, $preset, &$args, &$options) {
-  $npreset = $args['preset'];
+  $npreset = $preset;
   $temp = explode('_', $action);
   if(!isset($temp[1], $args['nid']) || $temp[0] != 'addcat') {
     return FALSE;
