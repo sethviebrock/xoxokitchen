@@ -316,7 +316,7 @@ function xoxo_search_field_widget_form(&$form, &$form_state, $field, $instance, 
     '#size' => XOXO_SEARCH_NAME_FORM_SIZE,
     '#ajax' => array(
       'callback' => '_xoxo_search_brands_refresh',
-      //'wrapper' => $brand_id,
+      'wrapper' => $brand_id,
       'progress' => array('type' => FALSE, 'throbber' => FALSE, 'message' => FALSE)
     )
   );
@@ -833,14 +833,22 @@ function _xoxo_search_brands_refresh($form, $form_state) {
   array_splice($par, -1, 1, 'brand');
   $brand = drupal_array_get_nested_value($form, $par);
   array_splice($par, -1, 1, 'name');
+  // Get the name of the ingredient entered by the user.
   $name = drupal_array_get_nested_value($form_state['values'], $par);
+  // Get the list of brand options for the ingredient.
   $brand['#options'] = array('-' => XOXO_SEARCH_BRAND) + _xoxo_search_brand_options($name);
   array_splice($par, -1, 1, '#id');
-  $field_id = drupal_array_get_nested_value($form, $par);
-  $brand_sel = "#$field_id .brand-wrapper";
-  $throb_sel = "#$field_id .ajax-progress-throbber";
+  // Set the field ID for the brand select list to fill in.
+  // This isn't working correctly, as the wrong ID is being selected, and it
+  // isn't needed for form elements.
+//  $field_id = drupal_array_get_nested_value($form, $par);
+//  $brand_sel = "#$field_id .brand-wrapper";
+  // Set the field ID for the throbber to remove.
+//  $throb_sel = "#$field_id .ajax-progress-throbber";
+  $throb_sel = ".ajax-progress-throbber";
   $coms = array(
-    ajax_command_replace($brand_sel, render($brand)),
+//    ajax_command_replace($brand_sel, render($brand)),
+    ajax_command_replace(NULL, render($brand)),
     ajax_command_remove($throb_sel)
   );
   return array('#type' => 'ajax', '#commands' => $coms);
