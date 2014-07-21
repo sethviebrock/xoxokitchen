@@ -206,7 +206,10 @@ function _xoxo_search_brand_options($name) {
     $q->condition('d.value', $p, 'REGEXP');
   }
   $q = _xoxo_search_filter_out($q);
-  return $q->fields('a', array('bid', 'value'))->execute()->fetchAllKeyed();
+  $results = $q->fields('a', array('bid', 'value'))->execute()->fetchAllKeyed();
+//watchdog('jasonstest', '$results from _xoxo_search_brand_options() = <pre>' . print_r($results, TRUE) . '</pre>');
+  return $results;
+//  return $q->fields('a', array('bid', 'value'))->execute()->fetchAllKeyed();
 }
 function _xoxo_search_brand_form($form = FALSE, $name = FALSE, $description = FALSE) {
   $o = _xoxo_search_brand_options($name);
@@ -651,26 +654,40 @@ function _xoxo_search_wrap($form, $form_state) {
 function _xoxo_search_nids($form, $form_state) {
   $pop = '<div id="xoxo-search-popup"></div>';
   $s = '#xoxo-search-popup';
+//watchdog('jasonstest', '$s = <pre>' . print_r($s, TRUE) . '</pre>');
   $s1 = $s . ' ul';
+//watchdog('jasonstest', '$s1 = <pre>' . print_r($s1, TRUE) . '</pre>');
   $cont = '<ul class="ingredients" field="%s">%s</ul>';
+//watchdog('jasonstest', '$cont = <pre>' . print_r($cont, TRUE) . '</pre>');
   $p = $form_state['triggering_element']['#parents'];
+//watchdog('jasonstest', '$p = <pre>' . print_r($p, TRUE) . '</pre>');
   array_splice($p, -1, 1, 'brand');
   $brand = drupal_array_get_nested_value($form_state['values'], $p);
+//watchdog('jasonstest', '$brand = <pre>' . print_r($brand, TRUE) . '</pre>');
   array_splice($p, -1, 1, 'name');
   $name = drupal_array_get_nested_value($form_state['values'], $p);
+//watchdog('jasonstest', '$name = <pre>' . print_r($name, TRUE) . '</pre>');
   array_splice($p, -1, 1, 'description');
   $description = drupal_array_get_nested_value($form_state['values'], $p);
+//watchdog('jasonstest', '$description = <pre>' . print_r($description, TRUE) . '</pre>');
   array_splice($p, -1, 1, 'options');
   $amount = drupal_array_get_nested_value($form_state['values'], $p);
+//watchdog('jasonstest', '$amount = <pre>' . print_r($amount, TRUE) . '</pre>');
   array_splice($p, -1, 1, array('nid', '#name'));
   $nid_id = drupal_array_get_nested_value($form, $p);
+//watchdog('jasonstest', '$nid_id = <pre>' . print_r($nid_id, TRUE) . '</pre>');
   $q = _xoxo_search_nids_query($name, $brand, $description);
-  $options = _xoxo_search_nids_html($q, $amount);
+//watchdog('jasonstest', '$q = <pre>' . print_r($q, TRUE) . '</pre>');
+//  $options = _xoxo_search_nids_html($q, $amount);
+  $options = _xoxo_search_nids_html($q, $name, $amount);
+//watchdog('jasonstest', '$options = "@options"', array('@options' => $options));
   if (empty($options) && empty($amount)) {
     $m = variable_get('xoxo_search_empty_message', '');
+//watchdog('jasonstest', '$m (this one?) = <pre>' . print_r($m, TRUE) . '</pre>');
     $br = db_select('xoxo_brands', 'x')->condition('x.bid', $brand)->fields('x',array( 'value'))->execute()->fetchField();
 //    $c = ajax_command_append($s, t($m, array('@name' => $name, '@brand' => $br, '@description' => $description)));
     $c = ajax_command_alert(t($m, array('@name' => $name, '@brand' => $br, '@description' => $description)));
+//watchdog('jasonstest', '$c = <pre>' . print_r($c, TRUE) . '</pre>');
     return array('#type' => 'ajax', '#commands' => array($c));
   }
   else{
@@ -851,6 +868,7 @@ function _xoxo_search_brands_refresh($form, $form_state) {
     ajax_command_replace(NULL, render($brand)),
     ajax_command_remove($throb_sel)
   );
+//watchdog('jasonstest', '$brand = <pre>' . print_r($brand, TRUE) . '</pre>');
   return array('#type' => 'ajax', '#commands' => $coms);
 }
 function _xoxo_search_add_node($form, $form_state) {
