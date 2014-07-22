@@ -9,7 +9,6 @@ function _xoxo_search_filter_out($query) {
   return $query;
 }
 function _xoxo_search_nids_html($query, $name, $amount = 0, $limit = 20) {
-//watchdog('jasonstest', '$query = <pre>' . print_r($query, TRUE) . '</pre>');
   db_query("SET OPTION SQL_BIG_SELECTS=1");
   $html = '';
   list($n, $b, $d, $tn, $tb, $td) = array(
@@ -25,7 +24,6 @@ function _xoxo_search_nids_html($query, $name, $amount = 0, $limit = 20) {
   $exp = 'CONCAT_WS(:s, %s)';
   $cols = array();
   $tbls = $query->getTables();
-//watchdog('jasonstest', '$tbls = <pre>' . print_r($tbls, TRUE) . '</pre>');
   if (array_key_exists($tn, $tbls)) {
     $cols[] = sprintf($col, $n);
   }
@@ -35,7 +33,6 @@ function _xoxo_search_nids_html($query, $name, $amount = 0, $limit = 20) {
   if (array_key_exists($td, $tbls)) {
     $cols[] = sprintf($col, $d);
   }
-//watchdog('jasonstest', '$cols = <pre>' . print_r($cols, TRUE) . '</pre>');
   if (empty($cols)) {
     return $html;
   }
@@ -47,15 +44,37 @@ function _xoxo_search_nids_html($query, $name, $amount = 0, $limit = 20) {
   $query->addField('x', 'value');
   $query->addField('brand', 'field_component_brand_value');
   $o = $query->execute()->fetchAll();
-//watchdog('jasonstest', '$o = <pre>' . print_r($o, TRUE) . '</pre>');
   foreach ($o as $array) {
-//watchdog('jasonstest', '$array = <pre>' . print_r($array, TRUE) . '</pre>');
     $html .= sprintf($option, $array->nid, $array->field_component_brand_value, $array->ing, $array->value);
   }
   if (empty($html)) {
-    $html .= sprintf($option, 0, 0, $name, $name);
-//watchdog('jasonstest', '$html 2 = "@html"', array('@html' => $html));
+    $nid = _xoxo_search_create_component($name);
+    $html .= sprintf($option, $nid, 1, $name, $name);
   }
-//watchdog('jasonstest', '$html 3 = "@html"', array('@html' => $html));
   return $html;
+}
+
+/**
+ * Creates a new component.
+ *
+ * @param string $name
+ *   The name of the component to create.
+ *
+ * @return integer
+ *   The node ID of the newly created component.
+ */
+function _xoxo_search_create_component($name) {
+  $node = new stdClass();
+  $node->type = 'component';
+  // Prepare the node object for editing and fill in a few default values.
+  node_object_prepare($node);
+  $node->language = LANGUAGE_NONE;
+
+  // Set the title and body of the node to the name of the ingredient.
+  $node->title = $name;
+  $node->body[$node->language][0]['value'] = $name;
+
+  // Save the node.
+  node_save($node);
+  return $node->nid;
 }
